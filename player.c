@@ -32,16 +32,6 @@ typedef struct {
 	uint32_t subchunk2_size;
 } WAVHeader;
 
-typedef struct {
-	uint32_t vorbis_version;
-	uint8_t audio_channels;
-	uint32_t audio_sample_rate;
-	int32_t bitrate_maximum;
-	int32_t bitrate_nominal;
-	int32_t bitrate_minimum;
-	uint8_t block_size;
-} OGGHeader;
-
 struct audio_info {
 	uint8_t *pcm_data;
 	snd_pcm_t *pcm_handle;
