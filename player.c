@@ -184,9 +184,9 @@ RESUME_AUDIO:
 		for (size_t i = 0; i < chunk; i++) {
 			for (size_t c = 0; c < channels; c++) {
 				float x = fbuf[i * channels + c];
-				x = bq_tick(&eq[0][c], x);
-				x = bq_tick(&eq[1][c], x);
-				x = bq_tick(&eq[2][c], x);
+				x = bq_process(&eq[0][c], x);
+				x = bq_process(&eq[1][c], x);
+				x = bq_process(&eq[2][c], x);
 				fbuf[i*channels + c] = x;
 			}
 		}
