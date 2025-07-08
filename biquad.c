@@ -109,3 +109,55 @@ bq_highshelf(
 	bq->a4 = a2 / a0;
 	bq_reset(bq);
 }
+
+void
+bq_lowpass(
+		struct Biquad *bq,
+		float f0,
+		float fs,
+		float q)
+{
+	const float w0 = 2.0f * M_PI * f0 / fs;
+	const float sn = sinf(w0), cs = cosf(w0);
+	const float alpha = sn / (2.0f * q);
+
+	const float b0 = (1.0f - cs) / 2.0f;
+	const float b1 = 1.0f - cs;
+	const float b2 = (1.0f - cs) / 2.0f;
+	const float a0 = 1.0f + alpha;
+	const float a1 = -2.0f * cs;
+	const float a2 = 1.0f - alpha;
+
+	bq->a0 = b0 / a0;
+	bq->a1 = b1 / a0;
+	bq->a2 = b2 / a0;
+	bq->a3 = a1 / a0;
+	bq->a4 = a2 / a0;
+	bq_reset(bq);
+}
+
+void
+bq_highpass(
+		struct Biquad *bq,
+		float f0,
+		float fs,
+		float q)
+{
+	const float w0 = 2.0f * M_PI * f0 / fs;
+	const float sn = sinf(w0), cs = cosf(w0);
+	const float alpha = sn / (2.0f * q);
+
+	const float b0 = (1.0f + cs) / 2.0f;
+	const float b1 = -(1.0f + cs);
+	const float b2 = (1.0f + cs) / 2.0f;
+	const float a0 = 1.0f + alpha;
+	const float a1 = -2.0f * cs;
+	const float a2 = 1.0f - alpha;
+
+	bq->a0 = b0 / a0;
+	bq->a1 = b1 / a0;
+	bq->a2 = b2 / a0;
+	bq->a3 = a1 / a0;
+	bq->a4 = a2 / a0;
+	bq_reset(bq);
+}

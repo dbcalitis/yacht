@@ -32,6 +32,20 @@ bq_highshelf(
 		float fs,
 		float q);
 
+void
+bq_lowpass(
+		struct Biquad *bq,
+		float f0,
+		float fs,
+		float q);
+
+void
+bq_highpass(
+		struct Biquad *bq,
+		float f0,
+		float fs,
+		float q);
+
 static inline float
 bq_process(struct Biquad *bq, float x)
 {

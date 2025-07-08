@@ -48,7 +48,6 @@ struct audio_info {
 // ((*buf) & 0x80) >>> 8;
 
 // TODO(daria): select audio folders
-// Use at least two threads for detecting input
 
 struct termios orig_termios;
 
@@ -130,12 +129,13 @@ audio_play(struct audio_info *info)
 	size_t channels = info->audio->num_channels;
 
 	struct Biquad eq[3][2];
-	float gains[3] = { -5.0f, -5.0f, -5.0f };
+	float gains[3] = { 1.0f, 1.0f, 1.0f };
 	float freqs[3] = { 100.f, 1000.f, 10000.f };
 
 	for (int b = 0; b < 3; b++)
 		for (size_t c = 0; c < channels; c++)
-			bq_highshelf(&eq[b][c], gains[b], freqs[b], (float)fs, 1.0f);
+			bq_lowpass(&eq[b][c], freqs[b], (float) fs, 1.0f);
+			//bq_highshelf(&eq[b][c], gains[b], freqs[b], (float)fs, 1.0f);
 
 	int16_t buffer[CHUNK_FRAMES * 2];
 	float fbuf[CHUNK_FRAMES * 2];
@@ -184,9 +184,9 @@ RESUME_AUDIO:
 		for (size_t i = 0; i < chunk; i++) {
 			for (size_t c = 0; c < channels; c++) {
 				float x = fbuf[i * channels + c];
-				x = bq_process(&eq[0][c], x);
+				//x = bq_process(&eq[0][c], x);
 				x = bq_process(&eq[1][c], x);
-				x = bq_process(&eq[2][c], x);
+				//x = bq_process(&eq[2][c], x);
 				fbuf[i*channels + c] = x;
 			}
 		}
