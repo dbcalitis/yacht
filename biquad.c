@@ -25,12 +25,12 @@ bq_peaking(
 		float db_gain,
 		float f0,
 		float fs,
-		float bw)
+		float q)
 {
 	const float A = powf(10.0f, db_gain / 40.0f);
 	const float w0 = 2 * M_PI * f0 / fs;
 	const float sn = sinf(w0), cs = cosf(w0);
-	const float alpha = sn * sinhf(M_LN2 / 2.0f * bw * w0 /sn);
+	const float alpha = sn / (2.0f * q);
 
 	const float alpha_A = alpha * A;
 	const float alpha_dA = alpha / A;
@@ -56,12 +56,12 @@ bq_lowshelf(
 		float db_gain,
 		float f0,
 		float fs,
-		float bw)
+		float q)
 {
 	const float A = powf(10.0f, db_gain / 40.0f);
 	const float w0 = 2.0f * M_PI * f0 / fs;
 	const float sn = sinf(w0), cs = cosf(w0);
-	const float alpha = sn * sinhf(M_LN2 / 2.0f * bw * w0 /sn);
+	const float alpha = sn / (2.0f * q);
 
 	const float beta = 2.0f * sqrtf(A) * alpha;
 
@@ -86,12 +86,12 @@ bq_highshelf(
 		float db_gain,
 		float f0,
 		float fs,
-		float bw)
+		float q)
 {
 	const float A = powf(10.0f, db_gain / 40.0f);
 	const float w0 = 2.0f * M_PI * f0 / fs;
 	const float sn = sinf(w0), cs = cosf(w0);
-	const float alpha = sn * sinhf(M_LN2 / 2.0f * bw * w0 /sn);
+	const float alpha = sn / (2.0f * q);
 
 	const float beta = 2 * sqrtf(A) * alpha;
 

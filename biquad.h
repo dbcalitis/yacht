@@ -14,7 +14,7 @@ bq_peaking(
 		float db_gain,
 		float f0,
 		float fs,
-		float bw);
+		float q);
 
 void
 bq_lowshelf(
@@ -22,7 +22,7 @@ bq_lowshelf(
 		float db_gain,
 		float f0,
 		float fs,
-		float bw);
+		float q);
 
 void
 bq_highshelf(
@@ -30,10 +30,10 @@ bq_highshelf(
 		float db_gain,
 		float f0,
 		float fs,
-		float bw);
+		float q);
 
 static inline float
-bq_tick(struct Biquad *bq, float x)
+bq_process(struct Biquad *bq, float x)
 {
 	float y = bq->a0 * x + bq->a1 * bq->x1 + bq->a2 * bq->x2
 		- bq->a3 * bq->y1 - bq->a4 * bq->y2;
