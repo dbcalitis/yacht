@@ -8,4 +8,4 @@ biquad.o: biquad.c
 	$(CC) -c biquad.c
 
 clean:
-	rm *.o jukebox
+	rm *.o yacht
