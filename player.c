@@ -69,6 +69,12 @@ enable_raw_mode()
 	tcsetattr(0, TCSANOW, &new_termios);
 }
 
+static inline void
+clear_screen()
+{
+	printf("\e[1;1H\e[2J");
+}
+
 int
 kbhit()
 {
@@ -242,6 +248,7 @@ main(int argc, char *argv[])
 	}
 
 	enable_raw_mode();
+	clear_screen();
 
 	// File info
 	{
