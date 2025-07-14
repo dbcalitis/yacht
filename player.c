@@ -84,13 +84,13 @@ kbhit()
 	if ((ret_val = poll(&pfd, 1, 0)) > 0 && (pfd.revents & POLLIN)) {
 		char c;
 		read(STDIN_FILENO, &c, 1);
-		if (c == 32) { // SPACE
+		if (c == ' ') { // SPACE
 			return 1;
 		} else if (c == 'q' || c == 'Q') {
 			return 2;
-		} else if (c == 60) { // <
+		} else if (c == '<') {
 			return 3;
-		} else if (c == 62) {
+		} else if (c == '>') {
 			return 4;
 		}
 	}
@@ -206,7 +206,7 @@ RESUME_AUDIO:
 		snd_pcm_sframes_t written = snd_pcm_writei(info->pcm_handle, buffer, chunk);
 
 		if (written < 0) {
-			fprintf(stderr, "underrun or write error: %s\n", snd_strerror(written));
+			//fprintf(stderr, "underrun or write error: %s\n", snd_strerror(written));
 			snd_pcm_prepare(info->pcm_handle);
 			continue;
 		}
