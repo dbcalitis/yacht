@@ -40,6 +40,5 @@ TODO
 - [ ] format support
     - [ ] WAV files
         - [X] 16-bit
-        - [ ] 24-bit
+        - [X] 24-bit
         - [ ] 32-bit
-    - [ ] OGG files
