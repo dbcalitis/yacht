@@ -37,8 +37,8 @@ TODO
     - [ ] add/remove songs
 - [ ] settings
     - [ ] customizable keybinds
-- [ ] format support
-    - [ ] WAV files
+- [X] format support
+    - [X] WAV files
         - [X] 16-bit
         - [X] 24-bit
-        - [ ] 32-bit
+        - [X] 32-bit
