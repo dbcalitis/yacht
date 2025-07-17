@@ -42,12 +42,22 @@ struct audio_info {
 	size_t audio_size;
 };
 
+enum FilterType {
+	BQ_NONE = 0,
+	BQ_PEAKING = 1,
+	BQ_LOWSHELF,
+	BQ_HIGHSHELF,
+	BQ_LOWPASS,
+	BQ_HIGHPASS,
+};
+
 // masking -
 // char *buf = mmap;
 // int32_t = *(int32_t *) buf;
 // ((*buf) & 0x80) >>> 8;
 
 // TODO(daria): select audio folders
+// TODO(daria): saved precomputed numbers for biquad
 
 struct termios orig_termios;
 
@@ -98,31 +108,11 @@ kbhit()
 	return 0;
 }
 
-snd_pcm_format_t
-get_audio_format(WAVHeader *header)
-{
-	// PCM
-	if (header->audio_format == 1) {
-		switch (header->bps) {
-		case 8:
-			return SND_PCM_FORMAT_S8;
-		case 16:
-			return SND_PCM_FORMAT_S16_LE;
-		case 24:
-			return SND_PCM_FORMAT_S24_LE;
-		case 32:
-			return SND_PCM_FORMAT_S32_LE;
-		}
-	}
-
-	return SND_PCM_FORMAT_UNKNOWN;
-}
-
 void
 audio_play(struct audio_info *info)
 {
 	char key;
-	size_t frames_per_sec = info->audio->sample_rate / info->audio->num_channels;
+	size_t frames_per_sec = info->audio->sample_rate ;//* info->audio->num_channels;
 	uint32_t five_sec = 5 * frames_per_sec;
 
 	size_t audio_duration = info->audio_size / info->audio->byte_rate;
@@ -134,21 +124,21 @@ audio_play(struct audio_info *info)
 	size_t fs = info->audio->sample_rate;
 	size_t channels = info->audio->num_channels;
 
+	// TODO(daria): make the eq modifiable
 	struct Biquad eq[3][2];
-	float gains[3] = { 1.0f, 1.0f, 1.0f };
+	float gains[3] = { 1.0f, 5.0f, 5.0f };
 	float freqs[3] = { 100.f, 1000.f, 10000.f };
 
 	for (int b = 0; b < 3; b++)
 		for (size_t c = 0; c < channels; c++)
 			bq_lowpass(&eq[b][c], freqs[b], (float) fs, 1.0f);
-			//bq_highshelf(&eq[b][c], gains[b], freqs[b], (float)fs, 1.0f);
+			//bq_lowshelf(&eq[b][c], gains[b], freqs[b], (float)fs, 1.0f);
 
-	int16_t buffer[CHUNK_FRAMES * 2];
-	float fbuf[CHUNK_FRAMES * 2];
+	static uint8_t buffer[CHUNK_FRAMES * 8];
+	static float fbuf[CHUNK_FRAMES * 8];
 
 	while (info->frames_played < info->total_frames)
 	{
-
 RESUME_AUDIO:
 		key = kbhit();
 		if (key == 1) { goto PAUSE_AUDIO; }
@@ -178,29 +168,66 @@ RESUME_AUDIO:
 
 		size_t frames_left = info->total_frames - info->frames_played;
 		size_t chunk = (frames_left > CHUNK_FRAMES) ? CHUNK_FRAMES : frames_left;
-		size_t copy_bytes = chunk * channels * sizeof(int16_t);
+		size_t bytes_per_sample = info->audio->bps / 8;
+		size_t copy_bytes = chunk * channels * bytes_per_sample; // sizeof(int16_t)
 
-		// TODO(daria): add support for other bit depths (8, 24, 32)
-		int16_t *chunk_ptr = (int16_t *) (info->pcm_data + (info->frames_played * info->frame_size));
+		uint8_t *chunk_ptr = (info->pcm_data + (info->frames_played * info->frame_size));
 		memcpy(buffer, chunk_ptr, copy_bytes);
 
-		for(size_t i = 0; i < chunk; i++)
-			fbuf[i] = buffer[i] / 32768.0f;
-
-		for (size_t i = 0; i < chunk; i++) {
-			for (size_t c = 0; c < channels; c++) {
-				float x = fbuf[i * channels + c];
-				//x = bq_process(&eq[0][c], x);
-				x = bq_process(&eq[1][c], x);
-				//x = bq_process(&eq[2][c], x);
-				fbuf[i*channels + c] = x;
+		uint8_t bps = info->audio->bps;
+		for (size_t i = 0; i < chunk * channels; i++)
+		{
+			if (bps == 16)
+			{
+				int16_t s = ((int16_t *)buffer)[i];
+				fbuf[i] = s / 32768.0f;
+			}
+			else if (bps == 24)
+			{
+				uint8_t *p = &buffer[i * 3];
+				int32_t s = (p[0] | (p[1] << 8) | (p[2] << 16));
+				if (s & 0x800000) s|= ~0xffffff;
+				fbuf[i] = s / 8388608.0f;
+			}
+			else
+			{
+				int32_t s = ((int32_t *) buffer)[i];
+				fbuf[i] = s / 2147483648.0f;
 			}
 		}
 
-		for (size_t i=0; i < chunk; i++) {
-			int32_t v = lroundf(fbuf[i] * 32767.0f);
-			if (v>32767) v =32767; else if (v<-32768) v=-32768;
-			buffer[i] = (int16_t)v;
+		for (size_t i = 0; i < chunk; i++)
+		{
+			for (size_t ch = 0; ch < channels; ch++)
+			{
+				int idx = i * channels + ch;
+				float x = fbuf[idx];
+				//x = bq_process(&eq[0][ch], x);
+				//x = bq_process(&eq[1][ch], x);
+				x = bq_process(&eq[2][ch], x);
+				fbuf[idx] = x;
+			}
+		}
+
+		for (size_t i = 0; i < chunk * channels; i++)
+		{
+			float x = fmaxf(-1.0f, fminf(1.0f, fbuf[i]));
+			if (bps == 16)
+			{
+				((int16_t *) buffer)[i] = (int16_t)(x * 32767.0f);
+			}
+			else if (bps == 24)
+			{
+				int32_t s = (int32_t)(x * 8388607.0f);
+				uint8_t *p = &buffer[i * 3];
+				p[0] = s & 0xff;
+				p[1] = (s >> 8) & 0xff;
+				p[2] = (s >> 16) & 0xff;
+			}
+			else
+			{
+				((int32_t *) buffer)[i] = (int32_t)(x * 2147483647.0f);
+			}
 		}
 
 		snd_pcm_sframes_t written = snd_pcm_writei(info->pcm_handle, buffer, chunk);
@@ -213,6 +240,8 @@ RESUME_AUDIO:
 
 		info->frames_played += written;
 
+		printf("Frames: %ld/%ld ", info->frames_played, info->total_frames);
+		
 		duration_played = info->frames_played / frames_per_sec;
 		fprintf(stdout, "Duration: %02ld:%02ld/%02ld:%02ld\r",
 				duration_played / 60,
@@ -243,7 +272,7 @@ main(int argc, char *argv[])
 	struct audio_info info;
 	
 	if (argc < 2) {
-		printf("Usage: %s <wav file>\n", argv[0]);
+		printf("Usage: %s <wav file> [--filter <txt file>]\n", argv[0]);
 		return 1;
 	}
 
@@ -329,14 +358,37 @@ main(int argc, char *argv[])
 
 	fprintf(stdout, "%s is a valid WAV file\n\r", argv[1]);
 
-	// Opens default sound device
+	// Assumes header is ~44 bytes, ignores subchunk2_size
+	// to avoid wrong data.
 	info.pcm_data = (uint8_t *) file_buf + sizeof(WAVHeader);
-	size_t pcm_size = header->subchunk2_size;
+	size_t pcm_size = info.audio_size - 45; //header->subchunk2_size;
 
+	// Opens default sound device
 	snd_pcm_open(&info.pcm_handle, "default", SND_PCM_STREAM_PLAYBACK, 0);
 
 	// Get the audio file's PCM format
-	snd_pcm_format_t pcm_format = get_audio_format(header);
+	snd_pcm_format_t pcm_format;
+
+	// PCM
+	switch (header->bps) {
+	case 16:
+		pcm_format = SND_PCM_FORMAT_S16_LE;
+		break;
+	case 24:
+		pcm_format = SND_PCM_FORMAT_S24_3LE;
+		break;
+	case 32:
+		pcm_format = SND_PCM_FORMAT_S32_LE;
+		break;
+	default:
+		fprintf(stderr, "Unsupported bit depth: %d\n", header->bps);
+		return 1;
+	}
+
+	info.audio = header;
+	info.frame_size = header->bps / 8 * header->num_channels;
+	info.total_frames = pcm_size / info.frame_size;
+	info.frames_played = 0;
 
 	// Sets the parameters
 	snd_pcm_set_params(info.pcm_handle,
@@ -348,11 +400,6 @@ main(int argc, char *argv[])
 
 	printf("Playing: %s\n\r", argv[1]);
 	fflush(stdout);
-
-	info.audio = header;
-	info.frame_size = header->bps / 8 * header->num_channels;
-	info.total_frames = pcm_size / info.frame_size;
-	info.frames_played = 0;
 
 	pthread_t player_thread;
 	err = pthread_create(&player_thread, NULL, (void *) audio_play, &info);
