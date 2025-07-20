@@ -124,7 +124,6 @@ audio_play(struct audio_info *info)
 	size_t fs = info->audio->sample_rate;
 	size_t channels = info->audio->num_channels;
 
-	// TODO(daria): make the eq modifiable
 	struct Biquad eq[3][2];
 	float gains[3] = { 1.0f, 5.0f, 5.0f };
 	float freqs[3] = { 100.f, 1000.f, 10000.f };
@@ -271,9 +270,16 @@ main(int argc, char *argv[])
 	FILE *fp;
 	struct audio_info info;
 	
-	if (argc < 2) {
+	if (argc < 2)
+	{
+		// TODO(daria): make the eq modifiable
+		// txt file format
+		// FILTER
+		// GAIN
+		// FREQ
+		// QUALITY
 		printf("Usage: %s <wav file> [--filter <txt file>]\n", argv[0]);
-		return 1;
+		exit(EXIT_FAILURE);
 	}
 
 	enable_raw_mode();
@@ -289,6 +295,7 @@ main(int argc, char *argv[])
 		info.audio_size = stat_buf.st_size;
 	}
 
+	// TODO(daria): close the fd when exiting the program
 	int fd = open(argv[1], O_RDONLY);
 	char *file_buf = (char *) mmap(NULL, info.audio_size, PROT_READ, MAP_SHARED, fd, 0);
 	if (file_buf == MAP_FAILED) {
@@ -308,6 +315,7 @@ main(int argc, char *argv[])
 		}
 	}
 
+	// TODO(daria): close the fp when exiting the program
 	// Opens the file
 	fp = fopen(argv[1], "rb");
 	if (!fp) {
@@ -382,7 +390,7 @@ main(int argc, char *argv[])
 		break;
 	default:
 		fprintf(stderr, "Unsupported bit depth: %d\n", header->bps);
-		return 1;
+		exit(EXIT_FAILURE);
 	}
 
 	info.audio = header;
@@ -412,6 +420,7 @@ main(int argc, char *argv[])
 
 	snd_pcm_drain(info.pcm_handle);
 	snd_pcm_close(info.pcm_handle);
+
 	munmap(file_buf, info.audio_size);
 	close(fd);
 
