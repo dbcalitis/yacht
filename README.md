@@ -5,7 +5,7 @@ Ride the WAVs.
 TODO
 - [ ] ui
     - [ ] display duration
-        - [ ] elapsed time / total duration
+        - [X] elapsed time / total duration
         - [ ] progress bar
     - [ ] playback status (e.g. playing/paused/stopped)
     - [ ] scrollable display
@@ -16,7 +16,7 @@ TODO
 - [ ] playback controls
     - [X] seek (forward/backward)
     - [X] pause/cancel
-    - [ ] audio loop
+    - [X] audio loop
     - [ ] playlist loop
     - [ ] next/previous track
     - [ ] mute
@@ -24,7 +24,7 @@ TODO
     - [X] biquad filters
     - [ ] allow customized params
         - [ ] cmdline
-            - [ ] txt file
+            - [X] txt file
             - [ ] flags
         - [ ] ui (through keys)
 - [ ] file navigation
