@@ -51,6 +51,22 @@ enum FilterType {
 	BQ_HIGHPASS,
 };
 
+struct biquad_info {
+	enum FilterType type;
+	float args[3];
+	// BQ_PEAKING, BQ_LOWSHELF, BQ_HIGHSHELF
+	// 0 - db_gain
+	// 1 - frequency
+	// 2 - quality
+
+	// BQ_LOW_PASS, BQ_HIGHPASS
+	// 0 - frequency
+	// 1 - quality
+};
+
+struct biquad_info _filters[3];
+uint8_t _num_filters = 0;
+
 // masking -
 // char *buf = mmap;
 // int32_t = *(int32_t *) buf;
@@ -129,13 +145,50 @@ audio_play(struct audio_info *info)
 	uint8_t channels = info->audio->num_channels;
 
 	struct Biquad eq[3][2];
-	float gains[3] = { 1.0f, 5.0f, 5.0f };
-	float freqs[3] = { 100.f, 1000.f, 10000.f };
 
-	for (int b = 0; b < 3; b++)
+	for (int b = 0; b < _num_filters; b++) {
 		for (uint8_t c = 0; c < channels; c++)
-			bq_lowpass(&eq[b][c], freqs[b], (float) fs, 1.0f);
-			//bq_lowshelf(&eq[b][c], gains[b], freqs[b], (float)fs, 1.0f);
+		{
+			switch (_filters[b].type)
+			{
+			case BQ_PEAKING:
+				bq_peaking(&eq[b][c],
+						_filters[b].args[0],
+						_filters[b].args[1],
+						(float) fs,
+						_filters[b].args[2]);
+				break;
+			case BQ_LOWSHELF:
+				bq_lowshelf(&eq[b][c],
+						_filters[b].args[0],
+						_filters[b].args[1],
+						(float) fs,
+						_filters[b].args[2]);
+				break;
+			case BQ_HIGHSHELF:
+				bq_highshelf(&eq[b][c],
+						_filters[b].args[0],
+						_filters[b].args[1],
+						(float) fs,
+						_filters[b].args[2]);
+				break;
+			case BQ_LOWPASS:
+				bq_lowpass(&eq[b][c],
+						_filters[b].args[0],
+						(float) fs,
+						_filters[b].args[1]);
+				break;
+			case BQ_HIGHPASS:
+				bq_highpass(&eq[b][c],
+						_filters[b].args[0],
+						(float) fs,
+						_filters[b].args[1]);
+				break;
+			default:
+				break;
+			}
+		}
+	}
 
 	static uint8_t buffer[CHUNK_FRAMES * 8];
 	static float fbuf[CHUNK_FRAMES * 8];
@@ -175,7 +228,6 @@ RESUME_AUDIO:
 			loop = !loop;
 		}
 
-
 		size_t frames_left = info->total_frames - info->frames_played;
 		size_t chunk = (frames_left > CHUNK_FRAMES) ? CHUNK_FRAMES : frames_left;
 		size_t bytes_per_sample = info->audio->bps / 8;
@@ -212,9 +264,10 @@ RESUME_AUDIO:
 			{
 				int idx = i * channels + ch;
 				float x = fbuf[idx];
-				//x = bq_process(&eq[0][ch], x);
-				//x = bq_process(&eq[1][ch], x);
-				x = bq_process(&eq[2][ch], x);
+				for (uint8_t n = 0; n < _num_filters; n++)
+				{
+					x = bq_process(&eq[n][ch], x);
+				}
 				fbuf[idx] = x;
 			}
 		}
@@ -251,7 +304,7 @@ RESUME_AUDIO:
 		info->frames_played += written;
 
 		printf("Frames: %ld/%ld ", info->frames_played, info->total_frames);
-		
+
 		duration_played = info->frames_played / frames_per_sec;
 		fprintf(stdout, "Duration: %02ld:%02ld/%02ld:%02ld\r",
 				duration_played / 60,
@@ -275,7 +328,7 @@ PAUSE_AUDIO:
 	}
 
 END_AUDIO:
-	return;
+	pthread_exit(NULL);
 }
 
 int
@@ -283,7 +336,6 @@ main(int argc, char *argv[])
 {
 	int err;
 	WAVHeader *header;
-	FILE *fp;
 	struct audio_info info;
 	
 	clear_screen();
@@ -292,14 +344,100 @@ main(int argc, char *argv[])
 
 	if (argc < 2)
 	{
-		// TODO(daria): make the eq modifiable
-		// txt file format
-		// FILTER
-		// GAIN
-		// FREQ
-		// QUALITY
 		printf("Usage: %s <wav file> [--filter <txt file>]\n", argv[0]);
 		exit(EXIT_FAILURE);
+	}
+	else if (argc >= 3)
+	{
+		for (uint8_t i = 1; i < argc; i++)
+		{
+			if (strcmp(argv[i], "--filter") == 0)
+			{
+				if (i + 1 >= argc)
+				{
+					printf("Usage: %s <wav file> [--filter <txt file>]\n",
+							argv[0]
+					);
+					exit(EXIT_FAILURE);
+				}
+
+				FILE *fp = fopen(argv[i + 1], "r");
+				char *line_buf = NULL;
+				size_t line_size = 0;
+				ssize_t nread = 0;
+
+				if (!fp)
+				{
+					fprintf(stderr, "Failed to open %s file\n", argv[i + 1]);
+					exit(EXIT_FAILURE);
+				}
+
+				uint8_t filter_nargs = 0;
+				while ((nread = getline(&line_buf, &line_size, fp)) != -1)
+				{
+					if (line_buf[nread - 1] == '\n')
+					{
+						line_buf[nread - 1] = '\0';
+					}
+
+					if (strcmp(line_buf, "BQ_PEAKING") == 0)
+					{
+						_filters[_num_filters].type = BQ_PEAKING;
+						filter_nargs = 3;
+					}
+					else if (strcmp(line_buf, "BQ_LOWSHELF") == 0)
+					{
+						_filters[_num_filters].type = BQ_LOWSHELF;
+						filter_nargs = 3;
+					}
+					else if (strcmp(line_buf, "BQ_HIGHSHELF") == 0)
+					{
+						_filters[_num_filters].type = BQ_HIGHSHELF;
+						filter_nargs = 3;
+					}
+					else if (strcmp(line_buf, "BQ_LOWPASS") == 0)
+					{
+						_filters[_num_filters].type = BQ_LOWPASS;
+						filter_nargs = 2;
+					}
+					else if (strcmp(line_buf, "BQ_HIGHPASS") == 0)
+					{
+						_filters[_num_filters].type = BQ_HIGHPASS;
+						filter_nargs = 2;
+					}
+					else
+					{
+						continue;
+					}
+
+					for (uint8_t i = 0; i < filter_nargs; i++)
+					{
+						if ((nread = getline(&line_buf, &line_size, fp) == -1))
+						{
+							fprintf(stderr,
+							"Not enough args for filter #%d",
+							_num_filters+ 1);
+							exit(EXIT_FAILURE);
+						}
+
+						errno = 0;
+						char* end;
+						_filters[_num_filters].args[i] = strtof(line_buf, &end);
+					}
+
+					_num_filters++;
+				}
+				
+				if (_num_filters== 0)
+				{
+					fprintf(stdout,
+					"No filters are applied; none were valid.\n");
+				}
+
+				free(line_buf);
+				fclose(fp);
+			}
+		}
 	}
 
 	enable_raw_mode();
@@ -314,7 +452,6 @@ main(int argc, char *argv[])
 		info.audio_size = stat_buf.st_size;
 	}
 
-	// TODO(daria): close the fd when exiting the program
 	int fd = open(argv[1], O_RDONLY);
 	char *file_buf = (char *) mmap(NULL, info.audio_size, PROT_READ, MAP_SHARED, fd, 0);
 	if (file_buf == MAP_FAILED) {
@@ -332,14 +469,6 @@ main(int argc, char *argv[])
 			fprintf(stderr, "%s file size does not match with chunk size.\n", argv[1]);
 			goto CLEANUP_FD;
 		}
-	}
-
-	// TODO(daria): close the fp when exiting the program
-	// Opens the file
-	fp = fopen(argv[1], "rb");
-	if (!fp) {
-		perror("Failed to open file");
-		goto CLEANUP_MMAP;
 	}
 
 	// Check if the file extension is .wav
@@ -441,8 +570,6 @@ main(int argc, char *argv[])
 	snd_pcm_close(info.pcm_handle);
 
 CLEANUP:
-	fclose(fp);
-CLEANUP_MMAP:
 	munmap(file_buf, info.audio_size);
 CLEANUP_FD:
 	close(fd);
