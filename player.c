@@ -126,14 +126,14 @@ audio_play(struct audio_info *info)
 	uint8_t loop = 0;
 
 	size_t fs = info->audio->sample_rate;
-	size_t channels = info->audio->num_channels;
+	uint8_t channels = info->audio->num_channels;
 
 	struct Biquad eq[3][2];
 	float gains[3] = { 1.0f, 5.0f, 5.0f };
 	float freqs[3] = { 100.f, 1000.f, 10000.f };
 
 	for (int b = 0; b < 3; b++)
-		for (size_t c = 0; c < channels; c++)
+		for (uint8_t c = 0; c < channels; c++)
 			bq_lowpass(&eq[b][c], freqs[b], (float) fs, 1.0f);
 			//bq_lowshelf(&eq[b][c], gains[b], freqs[b], (float)fs, 1.0f);
 
@@ -286,6 +286,10 @@ main(int argc, char *argv[])
 	FILE *fp;
 	struct audio_info info;
 	
+	clear_screen();
+	fflush(stdout);
+	fflush(stderr);
+
 	if (argc < 2)
 	{
 		// TODO(daria): make the eq modifiable
@@ -299,7 +303,6 @@ main(int argc, char *argv[])
 	}
 
 	enable_raw_mode();
-	clear_screen();
 
 	// File info
 	{
@@ -316,7 +319,7 @@ main(int argc, char *argv[])
 	char *file_buf = (char *) mmap(NULL, info.audio_size, PROT_READ, MAP_SHARED, fd, 0);
 	if (file_buf == MAP_FAILED) {
 		fprintf(stderr, "Failed to map %s file.\n", argv[1]);
-		exit(EXIT_FAILURE);
+		goto CLEANUP_FD;
 	}
 
 	header = (WAVHeader *) file_buf;
@@ -327,7 +330,7 @@ main(int argc, char *argv[])
 		int file_size_valid = info.audio_size - 8 - header->chunk_size;
 		if (file_size_valid != 0) {
 			fprintf(stderr, "%s file size does not match with chunk size.\n", argv[1]);
-			exit(EXIT_FAILURE);
+			goto CLEANUP_FD;
 		}
 	}
 
@@ -336,7 +339,7 @@ main(int argc, char *argv[])
 	fp = fopen(argv[1], "rb");
 	if (!fp) {
 		perror("Failed to open file");
-		exit(EXIT_FAILURE);
+		goto CLEANUP_MMAP;
 	}
 
 	// Check if the file extension is .wav
@@ -344,11 +347,11 @@ main(int argc, char *argv[])
 		char *ext = NULL;
 		if ((ext = strrchr(argv[1], '.')) == NULL) {
 			fprintf(stderr, "%s does not have a file extension.\n", argv[1]);
-			exit(EXIT_FAILURE);
+			goto CLEANUP;
 		}
 		if (strcmp(ext, ".wav") != 0 && strcmp(ext, ".WAV") != 0) {
 			fprintf(stderr, "%s is not a valid WAV file.", argv[1]);
-			exit(EXIT_FAILURE);
+			goto CLEANUP;
 		}
 	}
 
@@ -359,25 +362,25 @@ main(int argc, char *argv[])
 		/*!(strncmp(header->subchunk2_id, "data", 4) == 0)*/)
 	{
 		fprintf(stderr, "%s is not a valid WAV file; header is not formatted properly.\n", argv[1]);
-		exit(EXIT_FAILURE);
+		goto CLEANUP;
 	}
 
 	// Sample Rate in Normal Range
 	if (header->sample_rate < 8000 && header->sample_rate > 192000) {
 		fprintf(stderr, "%s file has sample rate headerside the normal range\n", argv[1]);
-		exit(EXIT_FAILURE);
+		goto CLEANUP;
 	}
 
 	// Number of Channels
 	if (header->num_channels != 1 && header->num_channels != 2) {
 		fprintf(stderr, "%s file is neither mono (1) or stereo (2)\n", argv[1]);
-		exit(EXIT_FAILURE);
+		goto CLEANUP;
 	}
 	
 	// BPS
 	if (!(header->bps == 8 || header->bps == 16 || header->bps == 24 || header->bps == 32)) {
 		fprintf(stderr, "%s file has invalid BPS\n", argv[1]);
-		exit(EXIT_FAILURE);
+		goto CLEANUP;
 	}
 
 	fprintf(stdout, "%s is a valid WAV file\n\r", argv[1]);
@@ -406,7 +409,7 @@ main(int argc, char *argv[])
 		break;
 	default:
 		fprintf(stderr, "Unsupported bit depth: %d\n", header->bps);
-		exit(EXIT_FAILURE);
+		goto CLEANUP;
 	}
 
 	info.audio = header;
@@ -429,7 +432,7 @@ main(int argc, char *argv[])
 	err = pthread_create(&player_thread, NULL, (void *) audio_play, &info);
 	if (err != 0) {
 		fprintf(stderr, "Failed to create a thread.\n");
-		exit(EXIT_FAILURE);
+		goto CLEANUP;
 	}
 
 	pthread_join(player_thread, NULL);
@@ -437,8 +440,13 @@ main(int argc, char *argv[])
 	snd_pcm_drain(info.pcm_handle);
 	snd_pcm_close(info.pcm_handle);
 
+CLEANUP:
+	fclose(fp);
+CLEANUP_MMAP:
 	munmap(file_buf, info.audio_size);
+CLEANUP_FD:
 	close(fd);
+	fflush(stderr);
 
 	return 0;
 }
