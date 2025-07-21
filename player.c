@@ -102,6 +102,8 @@ kbhit()
 			return 3;
 		} else if (c == '>') {
 			return 4;
+		} else if (c == 'l' || c == 'L') {
+			return 5;
 		}
 	}
 
@@ -120,6 +122,8 @@ audio_play(struct audio_info *info)
 	size_t audio_seconds = audio_duration % 60;
 
 	size_t duration_played;
+
+	uint8_t loop = 0;
 
 	size_t fs = info->audio->sample_rate;
 	size_t channels = info->audio->num_channels;
@@ -142,7 +146,7 @@ RESUME_AUDIO:
 		key = kbhit();
 		if (key == 1) { goto PAUSE_AUDIO; }
 		else if (key == 2) { goto END_AUDIO; }
-		else if (key == 3)
+		else if (key == 3) // <
 		{
 			snd_pcm_drop(info->pcm_handle);
 
@@ -154,7 +158,9 @@ RESUME_AUDIO:
 			}
 
 			snd_pcm_prepare(info->pcm_handle);
-		} else if (key == 4) { // >
+		}
+		else if (key == 4) // >
+		{
 			snd_pcm_drop(info->pcm_handle);
 
 			info->frames_played += five_sec;
@@ -164,6 +170,11 @@ RESUME_AUDIO:
 
 			snd_pcm_prepare(info->pcm_handle);
 		}
+		else if (key == 5)
+		{
+			loop = !loop;
+		}
+
 
 		size_t frames_left = info->total_frames - info->frames_played;
 		size_t chunk = (frames_left > CHUNK_FRAMES) ? CHUNK_FRAMES : frames_left;
@@ -249,6 +260,11 @@ RESUME_AUDIO:
 				audio_seconds
 		);
 		fflush(stdout);
+
+		if (loop && info->frames_played >= info->total_frames)
+		{
+			info->frames_played = 0;
+		}
 	}
 
 PAUSE_AUDIO:
