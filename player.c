@@ -32,14 +32,22 @@ typedef struct {
 	uint32_t subchunk2_size;
 } WAVHeader;
 
+enum PlayerState{
+	PLAYER_STOPPED,
+	PLAYER_PAUSED,
+	PLAYER_PLAYING,
+};
+
 struct audio_info {
-	uint8_t *pcm_data;
-	snd_pcm_t *pcm_handle;
 	WAVHeader *audio;
 	size_t frame_size;
 	size_t frames_played;
 	size_t total_frames;
 	size_t audio_size;
+	enum PlayerState state;
+	uint8_t *pcm_data;
+	uint8_t loop;
+	snd_pcm_t *pcm_handle;
 };
 
 enum FilterType {
@@ -127,11 +135,9 @@ kbhit()
 }
 
 void
-audio_play(struct audio_info *info)
+display_screen(struct audio_info *info)
 {
-	char key;
 	size_t frames_per_sec = info->audio->sample_rate ;//* info->audio->num_channels;
-	uint32_t five_sec = 5 * frames_per_sec;
 
 	size_t audio_duration = info->audio_size / info->audio->byte_rate;
 	size_t audio_minutes = audio_duration / 60;
@@ -139,7 +145,41 @@ audio_play(struct audio_info *info)
 
 	size_t duration_played;
 
-	uint8_t loop = 0;
+	static char state_str[3][10] = {
+		"STOPPED",
+		"PAUSED",
+		"PLAYING",
+	};
+
+	uint8_t stop  = 0;
+	while (1)
+	{
+		if (info->state == PLAYER_STOPPED)
+		{
+			stop = 1; // to show the player has stopped
+		}
+
+		duration_played = info->frames_played / frames_per_sec;
+		fprintf(stdout, "State: %s, Duration: %02ld:%02ld/%02ld:%02ld, Loop: %s  \r",
+				state_str[info->state],
+				duration_played / 60,
+				duration_played % 60,
+				audio_minutes,
+				audio_seconds,
+				info->loop ? "TRUE" : "FALSE"
+		);
+		fflush(stdout);
+
+		if (stop){ break; }
+	}
+}
+
+void
+audio_play(struct audio_info *info)
+{
+	char key;
+	size_t frames_per_sec = info->audio->sample_rate ;//* info->audio->num_channels;
+	uint32_t five_sec = 5 * frames_per_sec;
 
 	size_t fs = info->audio->sample_rate;
 	uint8_t channels = info->audio->num_channels;
@@ -193,6 +233,8 @@ audio_play(struct audio_info *info)
 	static uint8_t buffer[CHUNK_FRAMES * 8];
 	static float fbuf[CHUNK_FRAMES * 8];
 
+	info->state = PLAYER_PLAYING;
+
 	while (info->frames_played < info->total_frames)
 	{
 RESUME_AUDIO:
@@ -225,7 +267,7 @@ RESUME_AUDIO:
 		}
 		else if (key == 5)
 		{
-			loop = !loop;
+			info->loop = !info->loop;
 		}
 
 		size_t frames_left = info->total_frames - info->frames_played;
@@ -295,7 +337,8 @@ RESUME_AUDIO:
 
 		snd_pcm_sframes_t written = snd_pcm_writei(info->pcm_handle, buffer, chunk);
 
-		if (written < 0) {
+		if (written < 0)
+		{
 			//fprintf(stderr, "underrun or write error: %s\n", snd_strerror(written));
 			snd_pcm_prepare(info->pcm_handle);
 			continue;
@@ -303,18 +346,7 @@ RESUME_AUDIO:
 
 		info->frames_played += written;
 
-		printf("Frames: %ld/%ld ", info->frames_played, info->total_frames);
-
-		duration_played = info->frames_played / frames_per_sec;
-		fprintf(stdout, "Duration: %02ld:%02ld/%02ld:%02ld\r",
-				duration_played / 60,
-				duration_played % 60,
-				audio_minutes,
-				audio_seconds
-		);
-		fflush(stdout);
-
-		if (loop && info->frames_played >= info->total_frames)
+		if (info->loop && info->frames_played >= info->total_frames)
 		{
 			info->frames_played = 0;
 		}
@@ -324,10 +356,16 @@ PAUSE_AUDIO:
 	while ((key = kbhit()) != 2 &&
 		info->frames_played < info->total_frames)
 	{
-		if (key == 1) { goto RESUME_AUDIO; }
+		info->state = PLAYER_PAUSED;
+		if (key == 1)
+		{ 
+			info->state = PLAYER_PLAYING;
+			goto RESUME_AUDIO;
+		}
 	}
 
 END_AUDIO:
+	info->state = PLAYER_STOPPED;
 	pthread_exit(NULL);
 }
 
@@ -554,17 +592,25 @@ main(int argc, char *argv[])
 			header->sample_rate,
 			1, 500000);
 
-	printf("Playing: %s\n\r", argv[1]);
+	printf("Audio: %s\n\r", argv[1]);
 	fflush(stdout);
 
 	pthread_t player_thread;
+	pthread_t screen_thread;
 	err = pthread_create(&player_thread, NULL, (void *) audio_play, &info);
 	if (err != 0) {
 		fprintf(stderr, "Failed to create a thread.\n");
 		goto CLEANUP;
 	}
 
+	err = pthread_create(&screen_thread, NULL, (void *) display_screen, &info);
+	if (err != 0) {
+		fprintf(stderr, "Failed to create a thread.\n");
+		goto CLEANUP;
+	}
+
 	pthread_join(player_thread, NULL);
+	pthread_join(screen_thread, NULL);
 
 	snd_pcm_drain(info.pcm_handle);
 	snd_pcm_close(info.pcm_handle);
