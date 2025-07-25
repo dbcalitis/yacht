@@ -4,10 +4,9 @@ Ride the WAVs.
 
 TODO
 - [ ] ui
-    - [ ] display duration
+    - [X] display duration
         - [X] elapsed time / total duration
-        - [ ] progress bar
-    - [ ] playback status (e.g. playing/paused/stopped)
+    - [X] playback status (e.g. playing/paused/stopped)
     - [ ] scrollable display
          - [ ] highlight selected track
 - [ ] feedback/errors
