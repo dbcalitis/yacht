@@ -11,9 +11,15 @@
 
 #include <pthread.h>
 
+#include <sys/types.h>
+#include <dirent.h>
+#include <errno.h>
+
 #include "biquad.h"
 
 #define CHUNK_FRAMES 4096
+#define MAX_STRINGS 200
+#define MAX_STRING_LEN 200
 
 // no support for IEEE float
 typedef struct {
@@ -109,6 +115,12 @@ clear_screen()
 	printf("\e[1;1H\e[2J");
 }
 
+static inline void
+move_cursor(int row, int col)
+{
+	printf("\x1b[%d,%dH", row, col);
+}
+
 int
 kbhit()
 {
@@ -137,6 +149,7 @@ kbhit()
 void
 display_screen(struct audio_info *info)
 {
+	// TODO(daria): add a mutex.
 	size_t frames_per_sec = info->audio->sample_rate ;//* info->audio->num_channels;
 
 	size_t audio_duration = info->audio_size / info->audio->byte_rate;
@@ -184,6 +197,7 @@ audio_play(struct audio_info *info)
 	size_t fs = info->audio->sample_rate;
 	uint8_t channels = info->audio->num_channels;
 
+	// TODO(daria): modifiable eq while playing
 	struct Biquad eq[3][2];
 
 	for (int b = 0; b < _num_filters; b++) {
@@ -380,10 +394,162 @@ main(int argc, char *argv[])
 	fflush(stdout);
 	fflush(stderr);
 
+	char filepath[255];
+	(argc > 1) ? strncpy(filepath, argv[1], 255) : 0;
+
+	printf("-- \x1b[34myacht\x1b[0m --\n");
+	enable_raw_mode();
+
 	if (argc < 2)
 	{
-		printf("Usage: %s <wav file> [--filter <txt file>]\n", argv[0]);
-		exit(EXIT_FAILURE);
+		DIR * dir;
+		struct dirent * dir_entry;
+		char directories[MAX_STRINGS][MAX_STRING_LEN];
+		char files[MAX_STRINGS][MAX_STRING_LEN];
+		int num_dir;
+		int file_idx;
+
+		char c[2];
+		char input_line[255] = {0};
+		int length = 0;
+		int line_length = 0;
+
+		char loc_path[255];
+CHANGE_DIR:
+		getcwd(loc_path, 255);
+		memset(&directories[0], '\0', sizeof(directories));
+		num_dir = 0;
+		file_idx = 0;
+
+		fprintf(stdout, "Files:\n\r");
+
+		int i = 0;
+		char str[255];
+		strcpy(str, loc_path);
+		strcpy(directories[num_dir++], loc_path);
+
+		// PERF(daria): searching files
+		while (num_dir > 0)
+		{
+			char current_path[1024];
+			strcpy(current_path, directories[--num_dir]);
+
+			dir = opendir(current_path);
+			if (!dir)
+			{
+				if (errno == 24)
+				{
+					fprintf(stdout, "Notice: Reached max open files.\n\r");
+					break;
+				}
+				perror("opendir");
+				continue;
+			}
+
+			while ((dir_entry = readdir(dir)) != NULL)
+			{
+				if (dir_entry->d_name[0] == '.') continue;
+
+
+				char fullpath[1024];
+				snprintf(fullpath, sizeof(fullpath), "%s/%s", current_path, dir_entry->d_name);
+
+				struct stat st;
+				if (stat(fullpath, &st) == -1)
+				{
+					perror(fullpath);
+					continue;
+				}
+
+				if (S_ISDIR(st.st_mode))
+				{
+					strcpy(directories[num_dir], fullpath);
+					num_dir++;
+				}
+				else if (S_ISREG(st.st_mode))
+				{
+					char *link = &fullpath[strlen(loc_path) + 1];
+					if (file_idx < MAX_STRINGS)
+					{
+						strncpy(files[file_idx++], fullpath, 1024);
+					}
+					else { break; }
+
+					char *ext = strrchr(dir_entry->d_name, '.');
+					if (ext) {
+						int8_t val = strcmp(ext, ".wav");
+						if (val > 0 || val < 0) {
+							continue;
+						}
+						printf("\x1b[1m%s\x1b[0m\n\r", link);
+						i++;
+						continue;
+					}
+
+					printf("%s\n\r", link);
+				}
+			}
+		}
+
+		closedir(dir);
+
+		fprintf(stdout,
+				"\n\rNumber of WAV files: %d\n\r"
+				"Current Directory: %s\n\r",
+				i, loc_path);
+
+		while (length != -1)
+		{
+			fprintf(stdout, "\rEnter WAV file: %s", input_line);
+			fflush(stdout);
+
+			c[length] = '\0';
+			length = read(STDIN_FILENO, c, 1);
+			line_length = strlen(input_line);
+
+			// CTRLQ
+			if (c[0] == 17)  { return 0; }
+			// Ignore esc char
+			else if (c[0] == '\e') {
+				char seq[2];
+				read(STDIN_FILENO, &seq[0], 1);
+				read(STDIN_FILENO, &seq[1], 1);
+				continue;
+			}
+			// BSPACE
+			else if (c[0] == 127) { input_line[line_length - 1] = '\0'; }
+			// ENTER
+			else if (c[0] == 13)
+			{
+				fprintf(stdout, "\n\r");
+				fflush(stdout);
+
+				int result = chdir(input_line);
+				if (result != -1)
+				{
+					input_line[0] = '\0';
+					c[0] = '\0';
+					fprintf(stdout, "\n\r");
+					goto CHANGE_DIR;
+				}
+
+				fprintf(stdout, "\n\r");
+
+				char * pt;
+				for (i = 0; i < file_idx; i++)
+				{
+					pt = strstr(files[i], input_line);
+					if (pt) { break; }
+				}
+				// this is horrible
+				if (pt) { strncpy(filepath, files[i], 255); break; }
+				fprintf(stdout, "%s not found\n\r", input_line);
+			}
+			else if (line_length + 1 < 255) { strcat(input_line, c); }
+
+			// Clear current line
+			printf("\e[1G\e[2K");
+		}
 	}
 	else if (argc >= 3)
 	{
@@ -393,7 +559,7 @@ main(int argc, char *argv[])
 			{
 				if (i + 1 >= argc)
 				{
-					printf("Usage: %s <wav file> [--filter <txt file>]\n",
+					printf("Usage: %s <wav file> [--filter <txt file>]\n\r",
 							argv[0]
 					);
 					exit(EXIT_FAILURE);
@@ -406,7 +572,7 @@ main(int argc, char *argv[])
 
 				if (!fp)
 				{
-					fprintf(stderr, "Failed to open %s file\n", argv[i + 1]);
+					fprintf(stderr, "Failed to open %s file\n\r", argv[i + 1]);
 					exit(EXIT_FAILURE);
 				}
 
@@ -453,7 +619,7 @@ main(int argc, char *argv[])
 						if ((nread = getline(&line_buf, &line_size, fp) == -1))
 						{
 							fprintf(stderr,
-							"Not enough args for filter #%d",
+							"Not enough args for filter #%d\n\r",
 							_num_filters+ 1);
 							exit(EXIT_FAILURE);
 						}
@@ -469,7 +635,7 @@ main(int argc, char *argv[])
 				if (_num_filters== 0)
 				{
 					fprintf(stdout,
-					"No filters are applied; none were valid.\n");
+					"No filters are applied; none were valid.\n\r");
 				}
 
 				free(line_buf);
@@ -478,19 +644,17 @@ main(int argc, char *argv[])
 		}
 	}
 
-	enable_raw_mode();
-
 	// File info
 	{
 		struct stat stat_buf;
-		if ((err = stat(argv[1], &stat_buf)) != 0) {
-			fprintf(stderr, "stat failed.\n");
+		if ((err = stat(filepath, &stat_buf)) != 0) {
+			fprintf(stderr, "File not found, stat failed.\n\r");
 			exit(EXIT_FAILURE);
 		} 
 		info.audio_size = stat_buf.st_size;
 	}
 
-	int fd = open(argv[1], O_RDONLY);
+	int fd = open(filepath, O_RDONLY);
 	char *file_buf = (char *) mmap(NULL, info.audio_size, PROT_READ, MAP_SHARED, fd, 0);
 	if (file_buf == MAP_FAILED) {
 		fprintf(stderr, "Failed to map %s file.\n", argv[1]);
@@ -504,7 +668,7 @@ main(int argc, char *argv[])
 	{
 		int file_size_valid = info.audio_size - 8 - header->chunk_size;
 		if (file_size_valid != 0) {
-			fprintf(stderr, "%s file size does not match with chunk size.\n", argv[1]);
+			fprintf(stderr, "%s file size does not match with chunk size.\n", filepath);
 			goto CLEANUP_FD;
 		}
 	}
@@ -512,12 +676,12 @@ main(int argc, char *argv[])
 	// Check if the file extension is .wav
 	{
 		char *ext = NULL;
-		if ((ext = strrchr(argv[1], '.')) == NULL) {
-			fprintf(stderr, "%s does not have a file extension.\n", argv[1]);
+		if ((ext = strrchr(filepath, '.')) == NULL) {
+			fprintf(stderr, "%s does not have a file extension.\n", filepath);
 			goto CLEANUP;
 		}
 		if (strcmp(ext, ".wav") != 0 && strcmp(ext, ".WAV") != 0) {
-			fprintf(stderr, "%s is not a valid WAV file.", argv[1]);
+			fprintf(stderr, "%s is not a valid WAV file.", filepath);
 			goto CLEANUP;
 		}
 	}
@@ -528,29 +692,29 @@ main(int argc, char *argv[])
 		!(strncmp(header->subchunk1_id, "fmt ", 4) == 0)
 		/*!(strncmp(header->subchunk2_id, "data", 4) == 0)*/)
 	{
-		fprintf(stderr, "%s is not a valid WAV file; header is not formatted properly.\n", argv[1]);
+		fprintf(stderr, "%s is not a valid WAV file; header is not formatted properly.\n", filepath);
 		goto CLEANUP;
 	}
 
 	// Sample Rate in Normal Range
 	if (header->sample_rate < 8000 && header->sample_rate > 192000) {
-		fprintf(stderr, "%s file has sample rate headerside the normal range\n", argv[1]);
+		fprintf(stderr, "%s file has sample rate headerside the normal range\n", filepath);
 		goto CLEANUP;
 	}
 
 	// Number of Channels
 	if (header->num_channels != 1 && header->num_channels != 2) {
-		fprintf(stderr, "%s file is neither mono (1) or stereo (2)\n", argv[1]);
+		fprintf(stderr, "%s file is neither mono (1) or stereo (2)\n", filepath);
 		goto CLEANUP;
 	}
 	
 	// BPS
 	if (!(header->bps == 8 || header->bps == 16 || header->bps == 24 || header->bps == 32)) {
-		fprintf(stderr, "%s file has invalid BPS\n", argv[1]);
+		fprintf(stderr, "%s file has invalid BPS\n", filepath);
 		goto CLEANUP;
 	}
 
-	fprintf(stdout, "%s is a valid WAV file\n\r", argv[1]);
+	fprintf(stdout, "%s is a valid WAV file\n\r", filepath);
 
 	// Assumes header is ~44 bytes, ignores subchunk2_size
 	// to avoid wrong data.
@@ -592,8 +756,12 @@ main(int argc, char *argv[])
 			header->sample_rate,
 			1, 500000);
 
-	printf("Audio: %s\n\r", argv[1]);
-	fflush(stdout);
+	{
+		char * filename = strrchr(filepath, '/') + 1;
+		if (!filename) { filename = filepath; }
+		printf("Audio: %s\n\r", filename);
+		fflush(stdout);
+	}
 
 	pthread_t player_thread;
 	pthread_t screen_thread;
