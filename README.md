@@ -27,7 +27,7 @@ TODO
             - [ ] flags
         - [ ] ui (through keys)
 - [ ] file navigation
-    - [ ] file search
+    - [X] file search
     - [ ] add audio files from different locations
     - [ ] add folder containing audio files
 - [ ] playlists
