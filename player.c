@@ -8,6 +8,7 @@
 #include <alsa/asoundlib.h>
 #include <termios.h>
 #include <unistd.h>
+#include <ctype.h>
 
 #include <pthread.h>
 
@@ -22,8 +23,8 @@
 #define MAX_STRING_LEN 200
 
 #define move_cursor(x,y) fprintf(stdout, "\x1b[%d;%dH", (y), (x))
-#define hidecursor() fprintf(stdout, "\x1b[?25l")
-#define showcursor() fprintf(stdout, "\x1b[?25h")
+#define hide_cursor() fprintf(stdout, "\x1b[?25l")
+#define show_cursor() fprintf(stdout, "\x1b[?25h")
 
 // no support for IEEE float
 typedef struct
@@ -145,41 +146,20 @@ keyboard_hit(void)
 	if ((ret_val = poll(&pfd, 1, 0)) > 0 && (pfd.revents & POLLIN)) {
 		char c;
 		read(STDIN_FILENO, &c, 1);
-		if (c == ' ') { // SPACE
-			return 1;
-		} else if (c == 'q' || c == 'Q') {
-			return 2;
-		} else if (c == '<') {
-			return 3;
-		} else if (c == '>') {
-			return 4;
-		} else if (c == 'l' || c == 'L') {
-			return 5;
-		} else if (c == '1') {
-			return 6;
-		} else if (c == '2') {
-			return 7;
-		} else if (c == '3') {
-			return 8;
-		} else if (c == 'w') {
-			return 9;
-		} else if (c == 's') {
-			return 10;
-		} else if (c == 'a') {
-			return 11;
-		} else if (c == 'd') {
-			return 12;
-		} else if (c == 'k') {
-			return 13;
-		} else if (c == 'j') {
-			return 14;
+		if (isalpha(c) ||
+			isdigit(c) ||
+			c == ' ' ||
+			c == '<' ||
+			c == '>')
+		{
+			return c;
 		}
 	}
 
 	return 0;
 }
 
-void
+void *
 display_screen(struct audio_info *info)
 {
 	// TODO(daria): add a mutex.
@@ -190,7 +170,7 @@ display_screen(struct audio_info *info)
 	size_t audio_seconds = audio_duration % 60;
 
 	size_t duration_played;
-	hidecursor();
+	hide_cursor();
 
 	move_cursor(0,2);
 	// clears from cursor to end of screen
@@ -248,13 +228,15 @@ display_screen(struct audio_info *info)
 		fflush(stdout);
 
 		if (stop){
-			showcursor();
+			show_cursor();
 			break;
 		}
 	}
+
+	pthread_exit(NULL);
 }
 
-void
+void *
 audio_play(struct audio_info *info)
 {
 	char key;
@@ -325,9 +307,9 @@ BQ_CHANGE:
 	{
 RESUME_AUDIO:
 		key = keyboard_hit();
-		if (key == 1)
+		if (key == ' ')
 		{
-			while ((key = keyboard_hit()) != 2 &&
+			while ((key = keyboard_hit()) != 'q'  &&
 				info->frames_played < info->total_frames)
 			{
 				info->state = PLAYER_PAUSED;
@@ -339,8 +321,8 @@ RESUME_AUDIO:
 			}
 			goto END_AUDIO;
 		}
-		else if (key == 2) { goto END_AUDIO; } // put this first
-		else if (key == 3) // <
+		else if (key == 'q') { goto END_AUDIO; } // put this first
+		else if (key == '<')
 		{
 			snd_pcm_drop(info->pcm_handle);
 
@@ -353,7 +335,7 @@ RESUME_AUDIO:
 
 			snd_pcm_prepare(info->pcm_handle);
 		}
-		else if (key == 4) // >
+		else if (key == '>')
 		{
 			snd_pcm_drop(info->pcm_handle);
 
@@ -364,13 +346,13 @@ RESUME_AUDIO:
 
 			snd_pcm_prepare(info->pcm_handle);
 		}
-		else if (key == 5) { info->loop = !info->loop; }
+		else if (key == 'l') { info->loop = !info->loop; }
 		// NUMBERS (e.g. 1, 2, 3...)
-		else if (key == 6) { selected_bq = 0; printf("BQ 1\n\r"); }
-		else if (key == 7) { selected_bq = 1; printf("BQ 2\n\r"); }
-		else if (key == 8) { selected_bq = 2; printf("BQ 3\n\r"); }
+		else if (key == '1') { selected_bq = 0; printf("BQ 1\n\r"); }
+		else if (key == '2') { selected_bq = 1; printf("BQ 2\n\r"); }
+		else if (key == '3') { selected_bq = 2; printf("BQ 3\n\r"); }
 		// KEYS FOR EDITING BQs
-		else if (key == 9) // w
+		else if (key == 'w')
 		{
 			// TODO(daria): allow to add new bqs
 			if (selected_bq >= 3 /*_num_filters*/) { fprintf(stderr, "Please select a valid BQ."); }
@@ -380,7 +362,7 @@ RESUME_AUDIO:
 			}
 			goto BQ_CHANGE;
 		}
-		else if (key == 10) // s
+		else if (key == 's') // s
 		{
 			if (selected_bq >= _num_filters) { fprintf(stderr, "Please select a valid BQ."); }
 			if (--(_filters[selected_bq].type) < BQ_NONE)
@@ -390,15 +372,15 @@ RESUME_AUDIO:
 			goto BQ_CHANGE;
 		}
 		// CHANGES BQ PARAM TO MODIFY (db gain, frequency, quality)
-		else if (key == 11) // a
+		else if (key == 'a')
 		{
 			if (++selected_arg >= 3) { selected_arg = 0; }
 		}
-		else if (key == 12) // d
+		else if (key == 'd')
 		{
 			if (--selected_arg < 0) { selected_arg = 2; }
 		}
-		else if (key == 13) // k
+		else if (key == 'k')
 		{
 			if (selected_bq == 0) // db gain
 			{
@@ -415,7 +397,7 @@ RESUME_AUDIO:
 
 			goto BQ_CHANGE;
 		}
-		else if (key == 14) // j
+		else if (key == 'j')
 		{
 			if (selected_arg == 0) // db gain
 			{
@@ -521,8 +503,6 @@ RESUME_AUDIO:
 			info->frames_played = 0;
 		}
 	}
-
-PAUSE_AUDIO:
 
 END_AUDIO:
 	info->state = PLAYER_STOPPED;
