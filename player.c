@@ -21,8 +21,13 @@
 #define MAX_STRINGS 200
 #define MAX_STRING_LEN 200
 
+#define move_cursor(x,y) fprintf(stdout, "\x1b[%d;%dH", (y), (x))
+#define hidecursor() fprintf(stdout, "\x1b[?25l")
+#define showcursor() fprintf(stdout, "\x1b[?25h")
+
 // no support for IEEE float
-typedef struct {
+typedef struct
+{
 	char chunk_id[4];
 	uint32_t chunk_size;
 	char format[4];
@@ -38,13 +43,14 @@ typedef struct {
 	uint32_t subchunk2_size;
 } WAVHeader;
 
-enum PlayerState{
+enum PlayerState {
 	PLAYER_STOPPED,
 	PLAYER_PAUSED,
 	PLAYER_PLAYING,
 };
 
-struct audio_info {
+struct audio_info
+{
 	WAVHeader *audio;
 	size_t frame_size;
 	size_t frames_played;
@@ -53,10 +59,12 @@ struct audio_info {
 	enum PlayerState state;
 	uint8_t *pcm_data;
 	uint8_t loop;
+	char *filename;
 	snd_pcm_t *pcm_handle;
 };
 
-enum FilterType {
+enum FilterType : int
+{
 	BQ_NONE = 0,
 	BQ_PEAKING = 1,
 	BQ_LOWSHELF,
@@ -65,7 +73,15 @@ enum FilterType {
 	BQ_HIGHPASS,
 };
 
-struct biquad_info {
+// do i really need this? ;-;
+#define INIT_BQ(X, a, b, c) \
+	do { \
+		(X).type = BQ_NONE; \
+		memcpy((X).args, (float[]) {a, b, c}, sizeof((X).args)); \
+	} while (0)
+
+struct biquad_info
+{
 	enum FilterType type;
 	float args[3];
 	// BQ_PEAKING, BQ_LOWSHELF, BQ_HIGHSHELF
@@ -91,14 +107,16 @@ uint8_t _num_filters = 0;
 
 struct termios orig_termios;
 
+static inline
 void
-disable_raw_mode()
+disable_raw_mode(void)
 {
 	tcsetattr(0, TCSANOW, &orig_termios);
 }
 
+static inline
 void
-enable_raw_mode()
+enable_raw_mode(void)
 {
 	struct termios new_termios;
 	tcgetattr(0, &orig_termios);
@@ -109,24 +127,21 @@ enable_raw_mode()
 	tcsetattr(0, TCSANOW, &new_termios);
 }
 
-static inline void
-clear_screen()
+static inline
+void
+clear_screen(void)
 {
-	printf("\e[1;1H\e[2J");
+	fprintf(stdout,"\x1b[1;1H\x1b[2J");
 }
 
-static inline void
-move_cursor(int row, int col)
-{
-	printf("\x1b[%d,%dH", row, col);
-}
-
+static inline
 int
-kbhit()
+keyboard_hit(void)
 {
 	struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
 	int ret_val;
 
+	// TODO(daria): change ret value
 	if ((ret_val = poll(&pfd, 1, 0)) > 0 && (pfd.revents & POLLIN)) {
 		char c;
 		read(STDIN_FILENO, &c, 1);
@@ -140,6 +155,24 @@ kbhit()
 			return 4;
 		} else if (c == 'l' || c == 'L') {
 			return 5;
+		} else if (c == '1') {
+			return 6;
+		} else if (c == '2') {
+			return 7;
+		} else if (c == '3') {
+			return 8;
+		} else if (c == 'w') {
+			return 9;
+		} else if (c == 's') {
+			return 10;
+		} else if (c == 'a') {
+			return 11;
+		} else if (c == 'd') {
+			return 12;
+		} else if (c == 'k') {
+			return 13;
+		} else if (c == 'j') {
+			return 14;
 		}
 	}
 
@@ -157,6 +190,11 @@ display_screen(struct audio_info *info)
 	size_t audio_seconds = audio_duration % 60;
 
 	size_t duration_played;
+	hidecursor();
+
+	move_cursor(0,2);
+	// clears from cursor to end of screen
+	fprintf(stdout, "\x1b[J"); 
 
 	static char state_str[3][10] = {
 		"STOPPED",
@@ -165,7 +203,30 @@ display_screen(struct audio_info *info)
 	};
 
 	uint8_t stop  = 0;
-	while (1)
+
+	// TODO(daria): change the eq values when modified
+	{
+		int i = 0;
+		fprintf(stdout, "EQ:\n\r");
+		fprintf(stdout, "  \x1b[4m#\x1b[0m   \x1b[4m%-10s\x1b[0m \x1b[4m%-10s\x1b[0m "
+				"\x1b[4m%-10s\x1b[0m \x1b[4m%-5s\x1b[0m\n\r",
+				"TYPE", "DB GAIN",
+				"FREQUENCY", "QUALITY");
+		for (i = 0; i < 3; i++)
+		{
+			fprintf(stdout, "  %d - %-10d %-10.1f %-10.0f %-5.1f\n\r",
+					i,
+					_filters[i].type,
+					_filters[i].args[0],
+					_filters[i].args[1],
+					_filters[i].args[2]);
+		}
+		fprintf(stdout, "\n\r");
+	}
+
+	fprintf(stdout, "Audio: %s\n\r", info->filename);
+	fflush(stdout);
+	for (;;)
 	{
 		if (info->state == PLAYER_STOPPED)
 		{
@@ -173,17 +234,23 @@ display_screen(struct audio_info *info)
 		}
 
 		duration_played = info->frames_played / frames_per_sec;
-		fprintf(stdout, "State: %s, Duration: %02ld:%02ld/%02ld:%02ld, Loop: %s  \r",
+		move_cursor(0, 9);
+		fprintf(stdout, "State: %s, Loop: %s  \n\r",
 				state_str[info->state],
+				info->loop ? "TRUE" : "FALSE"
+		);
+		fprintf(stdout, "Duration: %02ld:%02ld/%02ld:%02ld\n\r",
 				duration_played / 60,
 				duration_played % 60,
 				audio_minutes,
-				audio_seconds,
-				info->loop ? "TRUE" : "FALSE"
-		);
+				audio_seconds
+	   );
 		fflush(stdout);
 
-		if (stop){ break; }
+		if (stop){
+			showcursor();
+			break;
+		}
 	}
 }
 
@@ -199,8 +266,13 @@ audio_play(struct audio_info *info)
 
 	// TODO(daria): modifiable eq while playing
 	struct Biquad eq[3][2];
+	int8_t selected_bq = 0;
+	int8_t selected_arg = 0;
 
-	for (int b = 0; b < _num_filters; b++) {
+	// TODO(daria): turn this into a function
+BQ_CHANGE:
+	for (int b = selected_bq; b < 3 /*_num_filters*/; b++)
+	{
 		for (uint8_t c = 0; c < channels; c++)
 		{
 			switch (_filters[b].type)
@@ -252,9 +324,22 @@ audio_play(struct audio_info *info)
 	while (info->frames_played < info->total_frames)
 	{
 RESUME_AUDIO:
-		key = kbhit();
-		if (key == 1) { goto PAUSE_AUDIO; }
-		else if (key == 2) { goto END_AUDIO; }
+		key = keyboard_hit();
+		if (key == 1)
+		{
+			while ((key = keyboard_hit()) != 2 &&
+				info->frames_played < info->total_frames)
+			{
+				info->state = PLAYER_PAUSED;
+				if (key == 1)
+				{ 
+					info->state = PLAYER_PLAYING;
+					goto RESUME_AUDIO;
+				}
+			}
+			goto END_AUDIO;
+		}
+		else if (key == 2) { goto END_AUDIO; } // put this first
 		else if (key == 3) // <
 		{
 			snd_pcm_drop(info->pcm_handle);
@@ -279,9 +364,77 @@ RESUME_AUDIO:
 
 			snd_pcm_prepare(info->pcm_handle);
 		}
-		else if (key == 5)
+		else if (key == 5) { info->loop = !info->loop; }
+		// NUMBERS (e.g. 1, 2, 3...)
+		else if (key == 6) { selected_bq = 0; printf("BQ 1\n\r"); }
+		else if (key == 7) { selected_bq = 1; printf("BQ 2\n\r"); }
+		else if (key == 8) { selected_bq = 2; printf("BQ 3\n\r"); }
+		// KEYS FOR EDITING BQs
+		else if (key == 9) // w
 		{
-			info->loop = !info->loop;
+			// TODO(daria): allow to add new bqs
+			if (selected_bq >= 3 /*_num_filters*/) { fprintf(stderr, "Please select a valid BQ."); }
+			if (++(_filters[selected_bq].type) > BQ_HIGHPASS)
+			{
+				_filters[selected_bq].type = BQ_NONE;
+			}
+			goto BQ_CHANGE;
+		}
+		else if (key == 10) // s
+		{
+			if (selected_bq >= _num_filters) { fprintf(stderr, "Please select a valid BQ."); }
+			if (--(_filters[selected_bq].type) < BQ_NONE)
+			{
+				_filters[selected_bq].type = BQ_HIGHPASS;
+			}
+			goto BQ_CHANGE;
+		}
+		// CHANGES BQ PARAM TO MODIFY (db gain, frequency, quality)
+		else if (key == 11) // a
+		{
+			if (++selected_arg >= 3) { selected_arg = 0; }
+		}
+		else if (key == 12) // d
+		{
+			if (--selected_arg < 0) { selected_arg = 2; }
+		}
+		else if (key == 13) // k
+		{
+			if (selected_bq == 0) // db gain
+			{
+				_filters[selected_bq].args[0] += 0.1f;
+			}
+			else if (selected_bq == 1) // freq
+			{
+				_filters[selected_bq].args[0] += 10.0f;
+			}
+			else if (selected_bq == 2) // quality
+			{
+				_filters[selected_bq].args[0] += 0.1f;
+			}
+
+			goto BQ_CHANGE;
+		}
+		else if (key == 14) // j
+		{
+			if (selected_arg == 0) // db gain
+			{
+				_filters[selected_bq].args[0] -= 0.1f;
+			}
+			else if (selected_arg == 1) // freq
+			{
+				_filters[selected_bq].args[1] -= 100.0f;
+			}
+			else if (selected_arg == 2) // quality
+			{
+				_filters[selected_bq].args[2] -= 0.1f;
+				if (_filters[selected_bq].args[2] <= 0.0f)
+				{
+					_filters[selected_bq].args[2] = 0.1f;
+				}
+			}
+
+			goto BQ_CHANGE;
 		}
 
 		size_t frames_left = info->total_frames - info->frames_played;
@@ -320,9 +473,12 @@ RESUME_AUDIO:
 			{
 				int idx = i * channels + ch;
 				float x = fbuf[idx];
-				for (uint8_t n = 0; n < _num_filters; n++)
+
+				// TEMP change
+				for (uint8_t n = 0; n < 3 /*_num_filters*/; n++)
 				{
-					x = bq_process(&eq[n][ch], x);
+					if (_filters[n].type != BQ_NONE)
+						x = bq_process(&eq[n][ch], x);
 				}
 				fbuf[idx] = x;
 			}
@@ -367,16 +523,6 @@ RESUME_AUDIO:
 	}
 
 PAUSE_AUDIO:
-	while ((key = kbhit()) != 2 &&
-		info->frames_played < info->total_frames)
-	{
-		info->state = PLAYER_PAUSED;
-		if (key == 1)
-		{ 
-			info->state = PLAYER_PLAYING;
-			goto RESUME_AUDIO;
-		}
-	}
 
 END_AUDIO:
 	info->state = PLAYER_STOPPED;
@@ -397,13 +543,17 @@ main(int argc, char *argv[])
 	char filepath[255];
 	(argc > 1) ? strncpy(filepath, argv[1], 255) : 0;
 
-	printf("-- \x1b[34myacht\x1b[0m --\n");
+	INIT_BQ(_filters[0], -5.0f, 1000.0f, 1.0f);
+	INIT_BQ(_filters[1], -5.0f, 1000.0f, 1.0f);
+	INIT_BQ(_filters[2], -5.0f, 1000.0f, 1.0f);
+
+	fprintf(stdout, "-- \x1b[34myacht\x1b[0m --\n");
 	enable_raw_mode();
 
 	if (argc < 2)
 	{
-		DIR * dir;
-		struct dirent * dir_entry;
+		DIR *dir;
+		struct dirent *dir_entry;
 		char directories[MAX_STRINGS][MAX_STRING_LEN];
 		char files[MAX_STRINGS][MAX_STRING_LEN];
 		int num_dir;
@@ -437,6 +587,7 @@ CHANGE_DIR:
 			dir = opendir(current_path);
 			if (!dir)
 			{
+				// TODO(daria): handle permission denied error
 				if (errno == 24)
 				{
 					fprintf(stdout, "Notice: Reached max open files.\n\r");
@@ -481,12 +632,12 @@ CHANGE_DIR:
 						if (val > 0 || val < 0) {
 							continue;
 						}
-						printf("\x1b[1m%s\x1b[0m\n\r", link);
+						fprintf(stdout, "\x1b[1m%s\x1b[0m\n\r", link);
 						i++;
 						continue;
 					}
 
-					printf("%s\n\r", link);
+					fprintf(stdout, "%s\n\r", link);
 				}
 			}
 		}
@@ -510,7 +661,8 @@ CHANGE_DIR:
 			// CTRLQ
 			if (c[0] == 17)  { return 0; }
 			// Ignore esc char
-			else if (c[0] == '\e') {
+			else if (c[0] == '\x1b')
+			{
 				char seq[2];
 				read(STDIN_FILENO, &seq[0], 1);
 				read(STDIN_FILENO, &seq[1], 1);
@@ -535,7 +687,7 @@ CHANGE_DIR:
 
 				fprintf(stdout, "\n\r");
 
-				char * pt;
+				char *pt;
 				for (i = 0; i < file_idx; i++)
 				{
 					pt = strstr(files[i], input_line);
@@ -548,7 +700,7 @@ CHANGE_DIR:
 			else if (line_length + 1 < 255) { strcat(input_line, c); }
 
 			// Clear current line
-			printf("\e[1G\e[2K");
+			fprintf(stdout, "\x1b[1G\x1b[2K");
 		}
 	}
 	else if (argc >= 3)
@@ -559,7 +711,7 @@ CHANGE_DIR:
 			{
 				if (i + 1 >= argc)
 				{
-					printf("Usage: %s <wav file> [--filter <txt file>]\n\r",
+					fprintf(stdout, "Usage: %s <wav file> [--filter <txt file>]\n\r",
 							argv[0]
 					);
 					exit(EXIT_FAILURE);
@@ -620,19 +772,19 @@ CHANGE_DIR:
 						{
 							fprintf(stderr,
 							"Not enough args for filter #%d\n\r",
-							_num_filters+ 1);
+							_num_filters + 1);
 							exit(EXIT_FAILURE);
 						}
 
 						errno = 0;
-						char* end;
+						char *end;
 						_filters[_num_filters].args[i] = strtof(line_buf, &end);
 					}
 
 					_num_filters++;
 				}
 				
-				if (_num_filters== 0)
+				if (_num_filters == 0)
 				{
 					fprintf(stdout,
 					"No filters are applied; none were valid.\n\r");
@@ -658,8 +810,9 @@ CHANGE_DIR:
 	char *file_buf = (char *) mmap(NULL, info.audio_size, PROT_READ, MAP_SHARED, fd, 0);
 	if (file_buf == MAP_FAILED) {
 		fprintf(stderr, "Failed to map %s file.\n", argv[1]);
-		goto CLEANUP_FD;
+		goto EXIT;
 	}
+	close(fd);
 
 	header = (WAVHeader *) file_buf;
 
@@ -669,7 +822,7 @@ CHANGE_DIR:
 		int file_size_valid = info.audio_size - 8 - header->chunk_size;
 		if (file_size_valid != 0) {
 			fprintf(stderr, "%s file size does not match with chunk size.\n", filepath);
-			goto CLEANUP_FD;
+			goto CLEANUP;
 		}
 	}
 
@@ -686,6 +839,7 @@ CHANGE_DIR:
 		}
 	}
 
+	// TODO(daria): check for LIST
 	// Headers
 	if (!(strncmp(header->chunk_id, "RIFF", 4) == 0) ||
 		!(strncmp(header->format, "WAVE", 4) == 0) ||
@@ -697,19 +851,22 @@ CHANGE_DIR:
 	}
 
 	// Sample Rate in Normal Range
-	if (header->sample_rate < 8000 && header->sample_rate > 192000) {
+	if (header->sample_rate < 8000 && header->sample_rate > 192000)
+	{
 		fprintf(stderr, "%s file has sample rate headerside the normal range\n", filepath);
 		goto CLEANUP;
 	}
 
 	// Number of Channels
-	if (header->num_channels != 1 && header->num_channels != 2) {
+	if (header->num_channels != 1 && header->num_channels != 2)
+	{
 		fprintf(stderr, "%s file is neither mono (1) or stereo (2)\n", filepath);
 		goto CLEANUP;
 	}
 	
 	// BPS
-	if (!(header->bps == 8 || header->bps == 16 || header->bps == 24 || header->bps == 32)) {
+	if (!(header->bps == 8 || header->bps == 16 || header->bps == 24 || header->bps == 32))
+	{
 		fprintf(stderr, "%s file has invalid BPS\n", filepath);
 		goto CLEANUP;
 	}
@@ -728,19 +885,20 @@ CHANGE_DIR:
 	snd_pcm_format_t pcm_format;
 
 	// PCM
-	switch (header->bps) {
-	case 16:
-		pcm_format = SND_PCM_FORMAT_S16_LE;
-		break;
-	case 24:
-		pcm_format = SND_PCM_FORMAT_S24_3LE;
-		break;
-	case 32:
-		pcm_format = SND_PCM_FORMAT_S32_LE;
-		break;
-	default:
-		fprintf(stderr, "Unsupported bit depth: %d\n", header->bps);
-		goto CLEANUP;
+	switch (header->bps)
+	{
+		case 16:
+			pcm_format = SND_PCM_FORMAT_S16_LE;
+			break;
+		case 24:
+			pcm_format = SND_PCM_FORMAT_S24_3LE;
+			break;
+		case 32:
+			pcm_format = SND_PCM_FORMAT_S32_LE;
+			break;
+		default:
+			fprintf(stderr, "Unsupported bit depth: %d\n", header->bps);
+			goto CLEANUP;
 	}
 
 	info.audio = header;
@@ -756,23 +914,22 @@ CHANGE_DIR:
 			header->sample_rate,
 			1, 500000);
 
-	{
-		char * filename = strrchr(filepath, '/') + 1;
-		if (!filename) { filename = filepath; }
-		printf("Audio: %s\n\r", filename);
-		fflush(stdout);
-	}
+	info.filename = strrchr(filepath, '/');
+	if (info.filename == NULL) { info.filename = filepath; }
+	else { info.filename += 1; }
 
 	pthread_t player_thread;
 	pthread_t screen_thread;
-	err = pthread_create(&player_thread, NULL, (void *) audio_play, &info);
-	if (err != 0) {
+	err = pthread_create(&player_thread, NULL, (void *(*)(void *)) audio_play, &info);
+	if (err != 0)
+	{
 		fprintf(stderr, "Failed to create a thread.\n");
 		goto CLEANUP;
 	}
 
-	err = pthread_create(&screen_thread, NULL, (void *) display_screen, &info);
-	if (err != 0) {
+	err = pthread_create(&screen_thread, NULL, (void *(*)(void *)) display_screen, &info);
+	if (err != 0)
+	{
 		fprintf(stderr, "Failed to create a thread.\n");
 		goto CLEANUP;
 	}
@@ -785,9 +942,7 @@ CHANGE_DIR:
 
 CLEANUP:
 	munmap(file_buf, info.audio_size);
-CLEANUP_FD:
-	close(fd);
+EXIT:
 	fflush(stderr);
-
 	return 0;
 }
