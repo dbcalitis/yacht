@@ -326,7 +326,7 @@ RESUME_AUDIO:
 		{
 			snd_pcm_drop(info->pcm_handle);
 
-			signed int duration_pos = info->frames_played - five_sec;
+			int32_t duration_pos = info->frames_played - five_sec;
 			if (duration_pos < 0) {
 				info->frames_played = 0;
 			} else {
@@ -521,7 +521,7 @@ main(int argc, char *argv[])
 	fflush(stderr);
 
 	char filepath[255];
-	(argc > 1) ? strncpy(filepath, argv[1], 255) : 0;
+	(argc > 1) ? strncpy(filepath, argv[1], 255) : 0; // lol
 
 	INIT_BQ(_filters[0], -5.0f, 1000.0f, 1.0f);
 	INIT_BQ(_filters[1], -5.0f, 1000.0f, 1.0f);
@@ -530,6 +530,7 @@ main(int argc, char *argv[])
 	fprintf(stdout, "-- \x1b[34myacht\x1b[0m --\n");
 	enable_raw_mode();
 
+	// make this shorter
 	if (argc < 2)
 	{
 		DIR *dir;
@@ -553,7 +554,7 @@ CHANGE_DIR:
 
 		fprintf(stdout, "Files:\n\r");
 
-		int i = 0;
+		int num_audio_files = 0;
 		char str[255];
 		strcpy(str, loc_path);
 		strcpy(directories[num_dir++], loc_path);
@@ -613,7 +614,7 @@ CHANGE_DIR:
 							continue;
 						}
 						fprintf(stdout, "\x1b[1m%s\x1b[0m\n\r", link);
-						i++;
+						num_audio_files++;
 						continue;
 					}
 
@@ -627,7 +628,7 @@ CHANGE_DIR:
 		fprintf(stdout,
 				"\n\rNumber of WAV files: %d\n\r"
 				"Current Directory: %s\n\r",
-				i, loc_path);
+				num_audio_files, loc_path);
 
 		while (length != -1)
 		{
@@ -668,7 +669,7 @@ CHANGE_DIR:
 				fprintf(stdout, "\n\r");
 
 				char *pt;
-				for (i = 0; i < file_idx; i++)
+				for (uint8_t i = 0; i < file_idx; i++)
 				{
 					pt = strstr(files[i], input_line);
 					if (pt) { break; }
@@ -856,7 +857,7 @@ CHANGE_DIR:
 	// Assumes header is ~44 bytes, ignores subchunk2_size
 	// to avoid wrong data.
 	info.pcm_data = (uint8_t *) file_buf + sizeof(WAVHeader);
-	size_t pcm_size = info.audio_size - 45; //header->subchunk2_size;
+	size_t pcm_size = header->subchunk2_size; //info.audio_size - 45;
 
 	// Opens default sound device
 	snd_pcm_open(&info.pcm_handle, "default", SND_PCM_STREAM_PLAYBACK, 0);

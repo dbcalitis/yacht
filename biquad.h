@@ -49,10 +49,18 @@ bq_highpass(
 static inline float
 bq_process(struct Biquad *bq, float x)
 {
-	float y = bq->a0 * x + bq->a1 * bq->x1 + bq->a2 * bq->x2
-		- bq->a3 * bq->y1 - bq->a4 * bq->y2;
-	bq->x2 = bq->x1; bq->x1 = x;
-	bq->y2 = bq->y1; bq->y1 = y;
+	float y =
+		bq->a0 * x +
+		bq->a1 * bq->x1 +
+		bq->a2 * bq->x2 -
+		bq->a3 * bq->y1 -
+		bq->a4 * bq->y2;
+
+	bq->x2 = bq->x1;
+	bq->x1 = x;
+	bq->y2 = bq->y1;
+	bq->y1 = y;
+
 	return y;
 }
 
