@@ -1,10 +1,10 @@
 #ifndef BIQUAD_H
 #define BIQUAD_H
 
-struct Biquad {
+typedef struct {
 	double a0, a1, a2, a3, a4;
 	double x1, x2, y1, y2;
-};
+} Biquad;
 
 void bq_reset(struct Biquad *bq);
 

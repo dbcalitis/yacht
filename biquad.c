@@ -16,12 +16,12 @@
 
 // sample of audio -> ff to do changes -> amplitude over time
 
-void bq_reset(struct Biquad *bq) { memset(&bq->x1, 0, 4 * sizeof(double)); }
+void bq_reset(Biquad *bq) { memset(&bq->x1, 0, 4 * sizeof(double)); }
 
 /*** AUDIO EQ COOKBOOK ***/
 void
 bq_peaking(
-		struct Biquad *bq,
+		Biquad *bq,
 		float db_gain,
 		float f0,
 		float fs,
@@ -52,7 +52,7 @@ bq_peaking(
 
 void
 bq_lowshelf(
-		struct Biquad *bq,
+		Biquad *bq,
 		float db_gain,
 		float f0,
 		float fs,
@@ -82,7 +82,7 @@ bq_lowshelf(
 
 void
 bq_highshelf(
-		struct Biquad *bq,
+		Biquad *bq,
 		float db_gain,
 		float f0,
 		float fs,
@@ -112,7 +112,7 @@ bq_highshelf(
 
 void
 bq_lowpass(
-		struct Biquad *bq,
+		Biquad *bq,
 		float f0,
 		float fs,
 		float q)
@@ -138,7 +138,7 @@ bq_lowpass(
 
 void
 bq_highpass(
-		struct Biquad *bq,
+		Biquad *bq,
 		float f0,
 		float fs,
 		float q)

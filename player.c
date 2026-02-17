@@ -56,7 +56,7 @@ enum PlayerState {
 	PLAYER_PLAYING,
 };
 
-struct audio_info
+typedef struct
 {
 	WAVHeader *audio;
 	size_t frame_size;
@@ -68,7 +68,7 @@ struct audio_info
 	uint8_t loop;
 	char *filename;
 	snd_pcm_t *pcm_handle;
-};
+} AudioInfo;
 
 enum FilterType : int
 {
@@ -87,7 +87,7 @@ enum FilterType : int
 		memcpy((X).args, (float[]) {a, b, c}, sizeof((X).args)); \
 	} while (0)
 
-struct biquad_info
+typedef struct
 {
 	enum FilterType type;
 	float args[3];
@@ -99,9 +99,9 @@ struct biquad_info
 	// BQ_LOW_PASS, BQ_HIGHPASS
 	// 0 - frequency
 	// 1 - quality
-};
+} BiquadInfo;
 
-struct biquad_info _filters[3];
+BiquadInfo _filters[3];
 uint8_t _num_filters = 0;
 
 // masking -
@@ -166,7 +166,7 @@ keyboard_hit(void)
 }
 
 void *
-display_screen(struct audio_info *info)
+display_screen(AudioInfo *info)
 {
 	// TODO(daria): add a mutex.
 	size_t frames_per_sec = info->audio->sample_rate ;//* info->audio->num_channels;
@@ -190,7 +190,6 @@ display_screen(struct audio_info *info)
 
 	uint8_t stop  = 0;
 
-	// TODO(daria): change the eq values when modified
 	{
 		int i = 0;
 		fprintf(stdout, "EQ:\n\r");
@@ -243,7 +242,7 @@ display_screen(struct audio_info *info)
 }
 
 void *
-audio_play(struct audio_info *info)
+audio_play(AudioInfo *info)
 {
 	char key;
 	size_t frames_per_sec = info->audio->sample_rate ;//* info->audio->num_channels;
@@ -253,7 +252,7 @@ audio_play(struct audio_info *info)
 	uint8_t channels = info->audio->num_channels;
 
 	// TODO(daria): modifiable eq while playing
-	struct Biquad eq[3][2];
+	Biquad eq[3][2];
 	int8_t selected_bq = 0;
 
 	for (int b = selected_bq; b < 3 /*_num_filters*/; b++)
@@ -529,7 +528,7 @@ main(int argc, char *argv[])
 {
 	int err;
 	WAVHeader header = { 0 };
-	struct audio_info info;
+	AudioInfo info;
 	
 	clear_screen();
 	fflush(stdout);
