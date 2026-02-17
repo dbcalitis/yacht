@@ -257,8 +257,6 @@ audio_play(struct audio_info *info)
 	int8_t selected_bq = 0;
 	int8_t selected_arg = 0;
 
-	// TODO(daria): turn this into a function
-BQ_CHANGE:
 	for (int b = selected_bq; b < 3 /*_num_filters*/; b++)
 	{
 		for (uint8_t c = 0; c < channels; c++)
