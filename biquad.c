@@ -161,3 +161,57 @@ bq_highpass(
 	bq->a4 = a2 / a0;
 	bq_reset(bq);
 }
+
+void
+bq_update(
+        Biquad (*bqs)[2],
+        BiquadInfo * bq_info, 
+        int num_bq,
+        int channels,
+        int fs)
+{
+	for (int b = 0; b < num_bq/*_num_filters*/; b++)
+	{
+		for (uint8_t c = 0; c < channels; c++)
+		{
+			switch (bq_info[b].type)
+			{
+			case BQ_PEAKING:
+				bq_peaking(&bqs[b][c],
+						bq_info[b].args[0],
+						bq_info[b].args[1],
+						(float) fs,
+						bq_info[b].args[2]);
+				break;
+			case BQ_LOWSHELF:
+				bq_lowshelf(&bqs[b][c],
+						bq_info[b].args[0],
+						bq_info[b].args[1],
+						(float) fs,
+						bq_info[b].args[2]);
+				break;
+			case BQ_HIGHSHELF:
+				bq_highshelf(&bqs[b][c],
+						bq_info[b].args[0],
+						bq_info[b].args[1],
+						(float) fs,
+						bq_info[b].args[2]);
+				break;
+			case BQ_LOWPASS:
+				bq_lowpass(&bqs[b][c],
+						bq_info[b].args[0],
+						(float) fs,
+						bq_info[b].args[1]);
+				break;
+			case BQ_HIGHPASS:
+				bq_highpass(&bqs[b][c],
+						bq_info[b].args[0],
+						(float) fs,
+						bq_info[b].args[1]);
+				break;
+			default:
+				break;
+			}
+		}
+	}
+}

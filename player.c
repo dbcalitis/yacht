@@ -70,36 +70,12 @@ typedef struct
 	snd_pcm_t *pcm_handle;
 } AudioInfo;
 
-enum FilterType : int
-{
-	BQ_NONE = 0,
-	BQ_PEAKING = 1,
-	BQ_LOWSHELF,
-	BQ_HIGHSHELF,
-	BQ_LOWPASS,
-	BQ_HIGHPASS,
-};
-
 // do i really need this? ;-;
 #define INIT_BQ(X, a, b, c) \
 	do { \
 		(X).type = BQ_NONE; \
 		memcpy((X).args, (float[]) {a, b, c}, sizeof((X).args)); \
 	} while (0)
-
-typedef struct
-{
-	enum FilterType type;
-	float args[3];
-	// BQ_PEAKING, BQ_LOWSHELF, BQ_HIGHSHELF
-	// 0 - db_gain
-	// 1 - frequency
-	// 2 - quality
-
-	// BQ_LOW_PASS, BQ_HIGHPASS
-	// 0 - frequency
-	// 1 - quality
-} BiquadInfo;
 
 BiquadInfo _filters[3];
 uint8_t _num_filters = 0;
@@ -255,50 +231,7 @@ audio_play(AudioInfo *info)
 	Biquad eq[3][2];
 	int8_t selected_bq = 0;
 
-	for (int b = selected_bq; b < 3 /*_num_filters*/; b++)
-	{
-		for (uint8_t c = 0; c < channels; c++)
-		{
-			switch (_filters[b].type)
-			{
-			case BQ_PEAKING:
-				bq_peaking(&eq[b][c],
-						_filters[b].args[0],
-						_filters[b].args[1],
-						(float) fs,
-						_filters[b].args[2]);
-				break;
-			case BQ_LOWSHELF:
-				bq_lowshelf(&eq[b][c],
-						_filters[b].args[0],
-						_filters[b].args[1],
-						(float) fs,
-						_filters[b].args[2]);
-				break;
-			case BQ_HIGHSHELF:
-				bq_highshelf(&eq[b][c],
-						_filters[b].args[0],
-						_filters[b].args[1],
-						(float) fs,
-						_filters[b].args[2]);
-				break;
-			case BQ_LOWPASS:
-				bq_lowpass(&eq[b][c],
-						_filters[b].args[0],
-						(float) fs,
-						_filters[b].args[1]);
-				break;
-			case BQ_HIGHPASS:
-				bq_highpass(&eq[b][c],
-						_filters[b].args[0],
-						(float) fs,
-						_filters[b].args[1]);
-				break;
-			default:
-				break;
-			}
-		}
-	}
+    bq_update(eq, _filters, 3, channels, fs);
 
 	static uint8_t buffer[CHUNK_FRAMES * 8];
 	static float fbuf[CHUNK_FRAMES * 8];
@@ -308,6 +241,7 @@ audio_play(AudioInfo *info)
 	while (info->frames_played < info->total_frames)
 	{
 		key = keyboard_hit();
+
 		if (key == 'q') { goto END_AUDIO; }
         else if (key == ' ')
 		{
