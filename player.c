@@ -20,7 +20,7 @@
 
 #define CHUNK_FRAMES 4096
 #define MAX_STRINGS 200
-#define MAX_STRING_LEN 200
+#define MAX_STRING_LEN 1024
 
 #define move_cursor(x,y) fprintf(stdout, "\x1b[%d;%dH", (y), (x))
 #define hide_cursor() fprintf(stdout, "\x1b[?25l")
@@ -311,9 +311,9 @@ BQ_CHANGE:
 
 	while (info->frames_played < info->total_frames)
 	{
-RESUME_AUDIO:
 		key = keyboard_hit();
-		if (key == ' ')
+		if (key == 'q') { goto END_AUDIO; }
+        else if (key == ' ')
 		{
 			snd_pcm_drop(info->pcm_handle);
             info->state = PLAYER_PAUSED;
@@ -323,12 +323,12 @@ RESUME_AUDIO:
 				if (key == ' ')
 				{ 
 					info->state = PLAYER_PLAYING;
-					goto RESUME_AUDIO;
+                    break;
 				}
 			}
-			goto END_AUDIO;
+            
+            if (key == 'q') { goto END_AUDIO;}
 		}
-		else if (key == 'q') { goto END_AUDIO; } // put this first
 		else if (key == '<')
 		{
 			snd_pcm_drop(info->pcm_handle);
@@ -517,6 +517,88 @@ END_AUDIO:
 }
 
 int
+print_files(
+        int *num_dir,
+        struct dirent *dir_entry,
+        DIR *dir,
+        char directories[MAX_STRINGS][MAX_STRING_LEN],
+        char *loc_path,
+        char files[MAX_STRINGS][MAX_STRING_LEN],
+        int *file_idx)
+{
+    int num_audio_files = 0;
+
+    fprintf(stdout, "Files:\n\r");
+
+    // PERF(daria): searching files
+    while (*num_dir > 0)
+    {
+        char current_path[1024] = { 0 };
+        fflush(stdout);
+
+        (*num_dir)--;
+        strcpy(current_path, directories[*num_dir]);
+
+        dir = opendir(current_path);
+
+        if (!dir)
+        {
+            // TODO(daria): handle permission denied error
+            if (errno == 24)
+            {
+                fprintf(stdout, "Notice: Reached max open files.\n\r");
+                break;
+            }
+            perror("opendir");
+            continue;
+        }
+
+        while ((dir_entry = readdir(dir)) != NULL)
+        {
+            if (dir_entry->d_name[0] == '.') continue;
+
+            char full_path[1024];
+            snprintf(full_path, sizeof(full_path), "%s/%s", current_path, dir_entry->d_name);
+
+            struct stat st;
+            if (stat(full_path, &st) == -1)
+            {
+                perror(full_path);
+                continue;
+            }
+
+            if (S_ISDIR(st.st_mode) && *num_dir != MAX_STRINGS)
+            {
+                strncpy(directories[*num_dir], full_path, MAX_STRING_LEN);
+                (*num_dir)++;
+            }
+            else if (S_ISREG(st.st_mode) == 1)
+            {
+                if (*file_idx < MAX_STRINGS)
+                {
+                    strncpy(files[(*file_idx)++], full_path, 1024);
+                }
+                else { break; }
+
+                char *link = &full_path[strlen(loc_path) + 1];
+                char *ext = strrchr(dir_entry->d_name, '.');
+
+                if (ext && strcmp(ext, ".wav") == 0) {
+                    fprintf(stdout, "\x1b[1m%s\x1b[0m\n\r", link);
+                    num_audio_files++;
+                    continue;
+                }
+
+                fprintf(stdout, "%s\n\r", link);
+            }
+        }
+        closedir(dir);
+    }
+
+    return num_audio_files;
+}
+
+int
 main(int argc, char *argv[])
 {
 	int err;
@@ -527,8 +609,8 @@ main(int argc, char *argv[])
 	fflush(stdout);
 	fflush(stderr);
 
-	char filepath[255];
-	(argc > 1) ? strncpy(filepath, argv[1], 255) : 0;
+	char file_path[255];
+	(argc > 1) ? strncpy(file_path, argv[1], 255) : 0;
 
 	INIT_BQ(_filters[0], -5.0f, 1000.0f, 1.0f);
 	INIT_BQ(_filters[1], -5.0f, 1000.0f, 1.0f);
@@ -537,108 +619,49 @@ main(int argc, char *argv[])
 	fprintf(stdout, "-- \x1b[34myacht\x1b[0m --\n");
 	enable_raw_mode();
 
-	if (argc < 2)
+	if (argc < 2) // Interactive Mode
 	{
-		DIR *dir;
-		struct dirent *dir_entry;
+        // ------------------------------- //
+        // ----- DIRECTORY TRAVERSAL ----- //
+        // ------------------------------- //
+
+		DIR *dir = NULL;
+		struct dirent *dir_entry = NULL;
 		char directories[MAX_STRINGS][MAX_STRING_LEN];
 		char files[MAX_STRINGS][MAX_STRING_LEN];
-		int num_dir;
-		int file_idx;
+		int num_dir = 0;
+		int file_idx = 0;
 
-		char c[2];
-		char input_line[255] = {0};
+		char c[2] = { 0 };
+		char input_line[255] = { 0 };
 		int length = 0;
 		int line_length = 0;
 
-		char loc_path[255];
-CHANGE_DIR:
+		char loc_path[255] = { 0 };
+
 		getcwd(loc_path, 255);
 		memset(&directories[0], '\0', sizeof(directories));
-		num_dir = 0;
-		file_idx = 0;
 
-		fprintf(stdout, "Files:\n\r");
+		int num_audio_files = 0;
 
-		int i = 0;
-		char str[255];
-		strcpy(str, loc_path);
-		strcpy(directories[num_dir++], loc_path);
+        // Add current directory to explore
+		strcpy(directories[num_dir], loc_path);
+        num_dir++;
 
-		// PERF(daria): searching files
-		while (num_dir > 0)
-		{
-			char current_path[1024];
-			strcpy(current_path, directories[--num_dir]);
-
-			dir = opendir(current_path);
-			if (!dir)
-			{
-				// TODO(daria): handle permission denied error
-				if (errno == 24)
-				{
-					fprintf(stdout, "Notice: Reached max open files.\n\r");
-					break;
-				}
-				perror("opendir");
-				continue;
-			}
-
-			while ((dir_entry = readdir(dir)) != NULL)
-			{
-				if (dir_entry->d_name[0] == '.') continue;
-
-
-				char fullpath[1024];
-				snprintf(fullpath, sizeof(fullpath), "%s/%s", current_path, dir_entry->d_name);
-
-				struct stat st;
-				if (stat(fullpath, &st) == -1)
-				{
-					perror(fullpath);
-					continue;
-				}
-
-				if (S_ISDIR(st.st_mode))
-				{
-					strcpy(directories[num_dir], fullpath);
-					num_dir++;
-				}
-				else if (S_ISREG(st.st_mode))
-				{
-					char *link = &fullpath[strlen(loc_path) + 1];
-					if (file_idx < MAX_STRINGS)
-					{
-						strncpy(files[file_idx++], fullpath, 1024);
-					}
-					else { break; }
-
-					char *ext = strrchr(dir_entry->d_name, '.');
-					if (ext) {
-						int8_t val = strcmp(ext, ".wav");
-						if (val > 0 || val < 0) {
-							continue;
-						}
-						fprintf(stdout, "\x1b[1m%s\x1b[0m\n\r", link);
-						i++;
-						continue;
-					}
-
-					fprintf(stdout, "%s\n\r", link);
-				}
-			}
-		}
-
-		closedir(dir);
+        // Print all files in the directory
+        // including ones in the subdirectory
+        num_audio_files = print_files(&num_dir, dir_entry, dir,
+                directories, loc_path, files, &file_idx);
 
 		fprintf(stdout,
 				"\n\rNumber of WAV files: %d\n\r"
 				"Current Directory: %s\n\r",
-				i, loc_path);
+				num_audio_files, loc_path);
 
+        // Shell-like loop
 		while (length != -1)
 		{
-			fprintf(stdout, "\rEnter WAV file: %s", input_line);
+			fprintf(stdout, "\rEnter WAV file (Ctrl-Q to exit): %s", input_line);
 			fflush(stdout);
 
 			c[length] = '\0';
@@ -647,7 +670,7 @@ CHANGE_DIR:
 
 			// CTRLQ
 			if (c[0] == 17)  { return 0; }
-			// Ignore esc char
+            // ESC - Ignore
 			else if (c[0] == '\x1b')
 			{
 				char seq[2];
@@ -656,7 +679,10 @@ CHANGE_DIR:
 				continue;
 			}
 			// BSPACE
-			else if (c[0] == 127) { input_line[line_length - 1] = '\0'; }
+			else if (c[0] == 127)
+            { 
+                input_line[line_length - 1] = '\0';
+            }
 			// ENTER
 			else if (c[0] == 13)
 			{
@@ -669,20 +695,39 @@ CHANGE_DIR:
 					input_line[0] = '\0';
 					c[0] = '\0';
 					fprintf(stdout, "\n\r");
-					goto CHANGE_DIR;
-				}
 
-				fprintf(stdout, "\n\r");
+                    getcwd(loc_path, 255);
 
-				char *pt;
-				for (i = 0; i < file_idx; i++)
-				{
-					pt = strstr(files[i], input_line);
-					if (pt) { break; }
+                    memset(&directories[0], '\0', MAX_STRINGS * MAX_STRING_LEN);
+                    memset(&files[0], '\0', MAX_STRINGS * MAX_STRING_LEN);
+                    num_dir = 1;
+                    file_idx = 0;
+
+                    strcpy(directories[0], loc_path);
+
+                    num_audio_files = print_files(&num_dir, dir_entry, dir,
+                            directories, loc_path, files, &file_idx);
+
+                    fprintf(stdout,
+                            "\n\rNumber of WAV files: %d\n\r"
+                            "Current Directory: %s\n\r",
+                            num_audio_files, loc_path);
 				}
-				// this is horrible
-				if (pt) { strncpy(filepath, files[i], 255); break; }
-				fprintf(stdout, "%s not found\n\r", input_line);
+                else
+                {
+                    fprintf(stdout, "\n\r");
+
+                    char *pt;
+                    uint8_t j = 0;
+                    for (; j < file_idx; j++)
+                    {
+                        pt = strstr(files[j], input_line);
+                        if (pt) { break; }
+                    }
+                    // this is horrible
+                    if (pt) { strncpy(file_path, files[j], 255); break; }
+                    fprintf(stdout, "%s not found\n\r", input_line);
+                }
 			}
 			else if (line_length + 1 < 255) { strcat(input_line, c); }
 
@@ -790,14 +835,14 @@ CHANGE_DIR:
     // Check if the file exists
 	{
 		struct stat stat_buf;
-		if ((err = stat(filepath, &stat_buf)) != 0) {
+		if ((err = stat(file_path, &stat_buf)) != 0) {
 			fprintf(stderr, "File not found, stat failed.\n\r");
 			exit(EXIT_FAILURE);
 		} 
 		info.audio_size = stat_buf.st_size;
 	}
 
-	int fd = open(filepath, O_RDONLY);
+	int fd = open(file_path, O_RDONLY);
 	char *file_buf = (char *) mmap(NULL, info.audio_size, PROT_READ, MAP_SHARED, fd, 0);
 	if (file_buf == MAP_FAILED) {
 		fprintf(stderr, "Failed to map %s file.\n", argv[1]);
@@ -808,6 +853,7 @@ CHANGE_DIR:
     uint8_t offset = 0;
 
     // RIFF Chunk
+
     memcpy((uint8_t *) &(header.chunk_id), file_buf + offset, 4);
     offset += 4;
 
@@ -835,7 +881,7 @@ CHANGE_DIR:
 	{
 		int file_size_valid = info.audio_size - 8 - header.chunk_size;
 		if (file_size_valid != 0) {
-			fprintf(stderr, "%s file size does not match with chunk size.\n", filepath);
+			fprintf(stderr, "%s file size does not match with chunk size.\n", file_path);
 			goto CLEANUP;
 		}
 	}
@@ -847,6 +893,8 @@ CHANGE_DIR:
         } chunk;
         uint8_t found_fmt = 0;
 
+        // Added a limit to the offset in case
+        // of an invalid WAV header
         while (offset < 100)
         {
             memcpy((uint8_t *) &chunk, file_buf + offset, 8);
@@ -857,7 +905,6 @@ CHANGE_DIR:
             {
                 memcpy(&(header.subchunk1_id), (uint8_t *) &chunk, 8);
                 memcpy(&(header.audio_format), (uint8_t *) file_buf + offset, 16);
-                printf("%.*d\n\r", 4, header.audio_format);
                 offset += 16;
                 found_fmt = 1;
             }
@@ -904,25 +951,25 @@ CHANGE_DIR:
 	// Sample Rate in Normal Range
 	if (header.sample_rate < 8000 && header.sample_rate > 192000)
 	{
-		fprintf(stderr, "%s file has sample rate outside the normal range\n", filepath);
+		fprintf(stderr, "%s file has sample rate outside the normal range\n", file_path);
 		goto CLEANUP;
 	}
 
 	// Number of Channels
 	if (header.num_channels != 1 && header.num_channels != 2)
 	{
-		fprintf(stderr, "%s file is neither mono (1) or stereo (2)\n", filepath);
+		fprintf(stderr, "%s file is neither mono (1) or stereo (2)\n", file_path);
 		goto CLEANUP;
 	}
 	
 	// BPS
 	if (!(header.bps == 8 || header.bps == 16 || header.bps == 24 || header.bps == 32))
 	{
-		fprintf(stderr, "%s file has invalid BPS\n", filepath);
+		fprintf(stderr, "%s file has invalid BPS\n", file_path);
 		goto CLEANUP;
 	}
 
-	fprintf(stdout, "%s is a valid WAV file\n\r", filepath);
+	fprintf(stdout, "%s is a valid WAV file\n\r", file_path);
 
 	// Assumes header is ~44 bytes, ignores subchunk2_size
 	// to avoid wrong data.
@@ -965,8 +1012,8 @@ CHANGE_DIR:
 			header.sample_rate,
 			1, 500000);
 
-	info.filename = strrchr(filepath, '/');
-	if (info.filename == NULL) { info.filename = filepath; }
+	info.filename = strrchr(file_path, '/');
+	if (info.filename == NULL) { info.filename = file_path; }
 	else { info.filename += 1; }
 
 	pthread_t player_thread;
@@ -990,6 +1037,7 @@ CHANGE_DIR:
 
 	snd_pcm_drain(info.pcm_handle);
 	snd_pcm_close(info.pcm_handle);
+    snd_config_update_free_global();
 
 CLEANUP:
 	munmap(file_buf, info.audio_size);
