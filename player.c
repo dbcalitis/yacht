@@ -255,7 +255,6 @@ audio_play(struct audio_info *info)
 	// TODO(daria): modifiable eq while playing
 	struct Biquad eq[3][2];
 	int8_t selected_bq = 0;
-	int8_t selected_arg = 0;
 
 	for (int b = selected_bq; b < 3 /*_num_filters*/; b++)
 	{
@@ -664,95 +663,99 @@ main(int argc, char *argv[])
 	}
 	else if (argc >= 3)
 	{
+        int filter_idx = -1;
+
 		for (uint8_t i = 1; i < argc; i++)
 		{
 			if (strcmp(argv[i], "--filter") == 0)
 			{
-				if (i + 1 >= argc)
-				{
-					fprintf(stdout, "Usage: %s <wav file> [--filter <txt file>]\n\r",
-							argv[0]
-					);
-					exit(EXIT_FAILURE);
-				}
-
-				FILE *fp = fopen(argv[i + 1], "r");
-				char *line_buf = NULL;
-				size_t line_size = 0;
-				ssize_t nread = 0;
-
-				if (!fp)
-				{
-					fprintf(stderr, "Failed to open %s file\n\r", argv[i + 1]);
-					exit(EXIT_FAILURE);
-				}
-
-				uint8_t filter_nargs = 0;
-				while ((nread = getline(&line_buf, &line_size, fp)) != -1)
-				{
-					if (line_buf[nread - 1] == '\n')
-					{
-						line_buf[nread - 1] = '\0';
-					}
-
-					if (strcmp(line_buf, "BQ_PEAKING") == 0)
-					{
-						_filters[_num_filters].type = BQ_PEAKING;
-						filter_nargs = 3;
-					}
-					else if (strcmp(line_buf, "BQ_LOWSHELF") == 0)
-					{
-						_filters[_num_filters].type = BQ_LOWSHELF;
-						filter_nargs = 3;
-					}
-					else if (strcmp(line_buf, "BQ_HIGHSHELF") == 0)
-					{
-						_filters[_num_filters].type = BQ_HIGHSHELF;
-						filter_nargs = 3;
-					}
-					else if (strcmp(line_buf, "BQ_LOWPASS") == 0)
-					{
-						_filters[_num_filters].type = BQ_LOWPASS;
-						filter_nargs = 2;
-					}
-					else if (strcmp(line_buf, "BQ_HIGHPASS") == 0)
-					{
-						_filters[_num_filters].type = BQ_HIGHPASS;
-						filter_nargs = 2;
-					}
-					else
-					{
-						continue;
-					}
-
-					for (uint8_t i = 0; i < filter_nargs; i++)
-					{
-						if ((nread = getline(&line_buf, &line_size, fp) == -1))
-						{
-							fprintf(stderr,
-							"Not enough args for filter #%d\n\r",
-							_num_filters + 1);
-							exit(EXIT_FAILURE);
-						}
-
-						errno = 0;
-						char *end;
-						_filters[_num_filters].args[i] = strtof(line_buf, &end);
-					}
-
-					_num_filters++;
-				}
-				
-				if (_num_filters == 0)
-				{
-					fprintf(stdout,
-					"No filters are applied; none were valid.\n\r");
-				}
-
-				free(line_buf);
-				fclose(fp);
+                filter_idx = i;
 			}
 		}
+        
+        if (filter_idx + 1 >= argc)
+        {
+            fprintf(stdout, "Usage: %s <wav file> [--filter <txt file>]\n\r",
+                    argv[0]
+            );
+            exit(EXIT_FAILURE);
+        }
+
+        FILE *fp = fopen(argv[filter_idx + 1], "r");
+        char *line_buf = NULL;
+        size_t line_size = 0;
+        ssize_t nread = 0;
+
+        if (!fp)
+        {
+            fprintf(stderr, "Failed to open %s file\n\r", argv[filter_idx + 1]);
+            exit(EXIT_FAILURE);
+        }
+
+        uint8_t filter_nargs = 0;
+        while ((nread = getline(&line_buf, &line_size, fp)) != -1)
+        {
+            if (line_buf[nread - 1] == '\n')
+            {
+                line_buf[nread - 1] = '\0';
+            }
+
+            if (strcmp(line_buf, "BQ_PEAKING") == 0)
+            {
+                _filters[_num_filters].type = BQ_PEAKING;
+                filter_nargs = 3;
+            }
+            else if (strcmp(line_buf, "BQ_LOWSHELF") == 0)
+            {
+                _filters[_num_filters].type = BQ_LOWSHELF;
+                filter_nargs = 3;
+            }
+            else if (strcmp(line_buf, "BQ_HIGHSHELF") == 0)
+            {
+                _filters[_num_filters].type = BQ_HIGHSHELF;
+                filter_nargs = 3;
+            }
+            else if (strcmp(line_buf, "BQ_LOWPASS") == 0)
+            {
+                _filters[_num_filters].type = BQ_LOWPASS;
+                filter_nargs = 2;
+            }
+            else if (strcmp(line_buf, "BQ_HIGHPASS") == 0)
+            {
+                _filters[_num_filters].type = BQ_HIGHPASS;
+                filter_nargs = 2;
+            }
+            else
+            {
+                continue;
+            }
+
+            for (uint8_t i = 0; i < filter_nargs; i++)
+            {
+                if ((nread = getline(&line_buf, &line_size, fp) == -1))
+                {
+                    fprintf(stderr,
+                    "Not enough args for filter #%d\n\r",
+                    _num_filters + 1);
+                    exit(EXIT_FAILURE);
+                }
+
+                errno = 0;
+                char *end;
+                _filters[_num_filters].args[i] = strtof(line_buf, &end);
+            }
+
+            _num_filters++;
+        }
+        
+        if (_num_filters == 0)
+        {
+            fprintf(stdout,
+            "No filters are applied; none were valid.\n\r");
+        }
+
+        free(line_buf);
+        fclose(fp);
 	}
     
     // ------------------------------- //
