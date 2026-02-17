@@ -29,9 +29,12 @@
 // no support for IEEE float
 typedef struct
 {
+    // RIFF Chunk
 	char chunk_id[4];
 	uint32_t chunk_size;
 	char format[4];
+
+    // FMT Subchunk
 	char subchunk1_id[4];
 	uint32_t subchunk1_size;
 	uint16_t audio_format;
@@ -40,9 +43,12 @@ typedef struct
 	uint32_t byte_rate; // per sec
 	uint16_t block_align;
 	uint16_t bps;
+
+    // Data Subchunk
 	char subchunk2_id[4];
 	uint32_t subchunk2_size;
-} WAVHeader;
+} __attribute__((packed))
+WAVHeader;
 
 enum PlayerState {
 	PLAYER_STOPPED,
@@ -309,11 +315,12 @@ RESUME_AUDIO:
 		key = keyboard_hit();
 		if (key == ' ')
 		{
+			snd_pcm_drop(info->pcm_handle);
+            info->state = PLAYER_PAUSED;
 			while ((key = keyboard_hit()) != 'q'  &&
 				info->frames_played < info->total_frames)
 			{
-				info->state = PLAYER_PAUSED;
-				if (key == 1)
+				if (key == ' ')
 				{ 
 					info->state = PLAYER_PLAYING;
 					goto RESUME_AUDIO;
@@ -513,7 +520,7 @@ int
 main(int argc, char *argv[])
 {
 	int err;
-	WAVHeader *header;
+	WAVHeader header = { 0 };
 	struct audio_info info;
 	
 	clear_screen();
@@ -775,8 +782,12 @@ CHANGE_DIR:
 			}
 		}
 	}
+    
+    // ------------------------------- //
+    // ------- FILE READING ---------- //
+    // ------------------------------- //
 
-	// File info
+    // Check if the file exists
 	{
 		struct stat stat_buf;
 		if ((err = stat(filepath, &stat_buf)) != 0) {
@@ -794,58 +805,118 @@ CHANGE_DIR:
 	}
 	close(fd);
 
-	header = (WAVHeader *) file_buf;
+    uint8_t offset = 0;
+
+    // RIFF Chunk
+    memcpy((uint8_t *) &(header.chunk_id), file_buf + offset, 4);
+    offset += 4;
+
+    memcpy((uint8_t *) &(header.chunk_size), file_buf + offset, 4);
+    offset += 4;
+
+    memcpy((uint8_t *) &(header.format), file_buf + offset, 4);
+    offset += 4;
+
+    // RIFF/WAVE container
+    if (strncmp(header.chunk_id, "RIFF", 4) != 0)
+    {
+        fprintf(stderr, "Not a valid RIFF/WAVE file.\n\r");
+        goto CLEANUP;
+    }
+    // Validate file size with WAV header
+    if (strncmp(header.format, "WAVE", 4) != 0)
+    {
+        fprintf(stderr, "WAVE chunk is not found.\n\r");
+        goto CLEANUP;
+    }
 
 	// Check file size
 	// Exclude extra 8 bytes from header
 	{
-		int file_size_valid = info.audio_size - 8 - header->chunk_size;
+		int file_size_valid = info.audio_size - 8 - header.chunk_size;
 		if (file_size_valid != 0) {
 			fprintf(stderr, "%s file size does not match with chunk size.\n", filepath);
 			goto CLEANUP;
 		}
 	}
 
-	// Check if the file extension is .wav
-	{
-		char *ext = NULL;
-		if ((ext = strrchr(filepath, '.')) == NULL) {
-			fprintf(stderr, "%s does not have a file extension.\n", filepath);
-			goto CLEANUP;
-		}
-		if (strcmp(ext, ".wav") != 0 && strcmp(ext, ".WAV") != 0) {
-			fprintf(stderr, "%s is not a valid WAV file.", filepath);
-			goto CLEANUP;
-		}
-	}
+    {
+        struct {
+            char id[4];
+            uint32_t size;
+        } chunk;
+        uint8_t found_fmt = 0;
 
-	// TODO(daria): check for LIST
-	// Headers
-	if (!(strncmp(header->chunk_id, "RIFF", 4) == 0) ||
-		!(strncmp(header->format, "WAVE", 4) == 0) ||
-		!(strncmp(header->subchunk1_id, "fmt ", 4) == 0)
-		/*!(strncmp(header->subchunk2_id, "data", 4) == 0)*/)
-	{
-		fprintf(stderr, "%s is not a valid WAV file; header is not formatted properly.\n", filepath);
-		goto CLEANUP;
-	}
+        while (offset < 100)
+        {
+            memcpy((uint8_t *) &chunk, file_buf + offset, 8);
+            offset += 8;
+            printf("%.*s\n\r", 4, chunk.id);
+
+            if (strncmp(chunk.id, "fmt ", 4) == 0)
+            {
+                memcpy(&(header.subchunk1_id), (uint8_t *) &chunk, 8);
+                memcpy(&(header.audio_format), (uint8_t *) file_buf + offset, 16);
+                printf("%.*d\n\r", 4, header.audio_format);
+                offset += 16;
+                found_fmt = 1;
+            }
+            else if (strncmp(chunk.id, "data", 4) == 0)
+            {
+                memcpy(&(header.subchunk2_id), &chunk, 8);
+                // Reached the actual audio
+                break;
+            }
+            else
+            {
+                // Skip other subchunks, checks for padding
+                uint32_t bytes_to_skip = chunk.size;
+
+                if (bytes_to_skip % 2 != 0)
+                {
+                    bytes_to_skip += 1;
+                }
+
+                offset += bytes_to_skip;
+            }
+
+            // TODO(daria): handle all types of chunks
+            // https://www.recordingblogs.com/wiki/wave-file-format
+        }
+
+        if (!found_fmt)
+        {
+            fprintf(stderr, "fmt subchunk is not found\n\r");
+            goto EXIT;
+        }
+        
+        if (offset > 100)
+        {
+            fprintf(stderr, "WAV Header is incomplete");
+            goto EXIT;
+        }
+    }
+
+    // ------------------------------- //
+    // --- HEADER FIELD VALIDATION --- //
+    // ------------------------------- //
 
 	// Sample Rate in Normal Range
-	if (header->sample_rate < 8000 && header->sample_rate > 192000)
+	if (header.sample_rate < 8000 && header.sample_rate > 192000)
 	{
-		fprintf(stderr, "%s file has sample rate headerside the normal range\n", filepath);
+		fprintf(stderr, "%s file has sample rate outside the normal range\n", filepath);
 		goto CLEANUP;
 	}
 
 	// Number of Channels
-	if (header->num_channels != 1 && header->num_channels != 2)
+	if (header.num_channels != 1 && header.num_channels != 2)
 	{
 		fprintf(stderr, "%s file is neither mono (1) or stereo (2)\n", filepath);
 		goto CLEANUP;
 	}
 	
 	// BPS
-	if (!(header->bps == 8 || header->bps == 16 || header->bps == 24 || header->bps == 32))
+	if (!(header.bps == 8 || header.bps == 16 || header.bps == 24 || header.bps == 32))
 	{
 		fprintf(stderr, "%s file has invalid BPS\n", filepath);
 		goto CLEANUP;
@@ -855,8 +926,8 @@ CHANGE_DIR:
 
 	// Assumes header is ~44 bytes, ignores subchunk2_size
 	// to avoid wrong data.
-	info.pcm_data = (uint8_t *) file_buf + sizeof(WAVHeader);
-	size_t pcm_size = info.audio_size - 45; //header->subchunk2_size;
+	info.pcm_data = (uint8_t *) file_buf + offset;
+	size_t pcm_size = header.subchunk2_size;//info.audio_size - 46; //header->subchunk2_size;
 
 	// Opens default sound device
 	snd_pcm_open(&info.pcm_handle, "default", SND_PCM_STREAM_PLAYBACK, 0);
@@ -865,7 +936,7 @@ CHANGE_DIR:
 	snd_pcm_format_t pcm_format;
 
 	// PCM
-	switch (header->bps)
+	switch (header.bps)
 	{
 		case 16:
 			pcm_format = SND_PCM_FORMAT_S16_LE;
@@ -877,12 +948,12 @@ CHANGE_DIR:
 			pcm_format = SND_PCM_FORMAT_S32_LE;
 			break;
 		default:
-			fprintf(stderr, "Unsupported bit depth: %d\n", header->bps);
+			fprintf(stderr, "Unsupported bit depth: %d\n", header.bps);
 			goto CLEANUP;
 	}
 
-	info.audio = header;
-	info.frame_size = header->bps / 8 * header->num_channels;
+	info.audio = &header;
+	info.frame_size = header.bps / 8 * header.num_channels;
 	info.total_frames = pcm_size / info.frame_size;
 	info.frames_played = 0;
 
@@ -890,8 +961,8 @@ CHANGE_DIR:
 	snd_pcm_set_params(info.pcm_handle,
 			pcm_format,
 			SND_PCM_ACCESS_RW_INTERLEAVED,
-			header->num_channels,
-			header->sample_rate,
+			header.num_channels,
+			header.sample_rate,
 			1, 500000);
 
 	info.filename = strrchr(filepath, '/');
