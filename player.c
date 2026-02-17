@@ -661,7 +661,22 @@ main(int argc, char *argv[])
 			fprintf(stdout, "\x1b[1G\x1b[2K");
 		}
 	}
-	else if (argc >= 3)
+
+    if (argc >= 2)
+    {
+        char *ext = strrchr(argv[1], '.');
+
+        if ((ext && strcmp(ext, ".wav") != 0) ||
+            (ext == NULL))
+        {
+            fprintf(stdout, "Usage: %s <wav file> [--filter <txt file>]\n\r",
+                    argv[0]
+            );
+            exit(EXIT_FAILURE);
+        }
+    }
+
+	if (argc >= 3)
 	{
         int filter_idx = -1;
 
