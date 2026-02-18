@@ -128,6 +128,14 @@ keyboard_hit(void)
 	if ((ret_val = poll(&pfd, 1, 0)) > 0 && (pfd.revents & POLLIN)) {
 		char c;
 		read(STDIN_FILENO, &c, 1);
+
+        // Prevents character smashing
+        char junk;
+        while (poll(&pfd, 1, 0) > 0)
+        {
+            read(STDIN_FILENO, &junk, 1);
+        }
+
 		if (isalpha(c) ||
 			isdigit(c) ||
 			c == ' ' ||
@@ -166,29 +174,31 @@ display_screen(AudioInfo *info)
 
 	uint8_t stop  = 0;
 
+    fprintf(stdout, "EQ:\n\r");
+    fprintf(stdout, "  \x1b[4m#\x1b[0m   \x1b[4m%-10s\x1b[0m \x1b[4m%-10s\x1b[0m "
+            "\x1b[4m%-10s\x1b[0m \x1b[4m%-5s\x1b[0m\n\r",
+            "TYPE", "DB GAIN",
+            "FREQUENCY", "QUALITY");
+
+	for (;;)
 	{
-		int i = 0;
-		fprintf(stdout, "EQ:\n\r");
-		fprintf(stdout, "  \x1b[4m#\x1b[0m   \x1b[4m%-10s\x1b[0m \x1b[4m%-10s\x1b[0m "
-				"\x1b[4m%-10s\x1b[0m \x1b[4m%-5s\x1b[0m\n\r",
-				"TYPE", "DB GAIN",
-				"FREQUENCY", "QUALITY");
-		for (i = 0; i < 3; i++)
+        move_cursor(0, 4);
+
+		for (int i = 0; i < 3; i++)
 		{
 			fprintf(stdout, "  %d - %-10d %-10.1f %-10.0f %-5.1f\n\r",
 					i,
 					_filters[i].type,
+					_filters[i].args[2],
 					_filters[i].args[0],
-					_filters[i].args[1],
-					_filters[i].args[2]);
+					_filters[i].args[1]);
 		}
-		fprintf(stdout, "\n\r");
-	}
 
-	fprintf(stdout, "Audio: %s\n\r", info->filename);
-	fflush(stdout);
-	for (;;)
-	{
+		fprintf(stdout, "\n\r");
+
+        fprintf(stdout, "Audio: %s\n\r", info->filename);
+        fflush(stdout);
+
 		if (info->state == PLAYER_STOPPED)
 		{
 			stop = 1; // to show the player has stopped
@@ -198,14 +208,12 @@ display_screen(AudioInfo *info)
 		move_cursor(0, 9);
 		fprintf(stdout, "State: %s, Loop: %s  \n\r",
 				state_str[info->state],
-				info->loop ? "TRUE" : "FALSE"
-		);
+				info->loop ? "TRUE" : "FALSE");
 		fprintf(stdout, "Duration: %02ld:%02ld/%02ld:%02ld\n\r",
 				duration_played / 60,
 				duration_played % 60,
 				audio_minutes,
-				audio_seconds
-	   );
+				audio_seconds);
 		fflush(stdout);
 
 		if (stop){
@@ -230,6 +238,7 @@ audio_play(AudioInfo *info)
 	// TODO(daria): modifiable eq while playing
 	Biquad eq[3][2];
 	int8_t selected_bq = 0;
+    int8_t selected_setting = 0;
 
     bq_update(eq, _filters, 3, channels, fs);
 
@@ -242,7 +251,7 @@ audio_play(AudioInfo *info)
 	{
 		key = keyboard_hit();
 
-		if (key == 'q') { goto END_AUDIO; }
+		if (key == 'Q') { goto END_AUDIO; }
         else if (key == ' ')
 		{
 			snd_pcm_drop(info->pcm_handle);
@@ -284,6 +293,109 @@ audio_play(AudioInfo *info)
 			snd_pcm_prepare(info->pcm_handle);
 		}
 		else if (key == 'l') { info->loop = !info->loop; }
+
+        // ------------------------------- //
+        // ------- BIQUAD CONTROL -------- //
+        // ------------------------------- //
+        
+        // Check if key is a digit
+        // TODO(daria): have up to 5 bq, it's only 3 right now
+        if (((unsigned)key - '0' < 10) &&
+            (key >= '0' && key < '3'))
+        {
+            selected_bq = key - '0';
+        }
+        // change type
+        else if (key == 't' || key == 'd' || key == 'f' || key == 'q')
+        {
+            selected_setting = key;
+        }
+        else if (key == 'j')
+        {
+            switch (selected_setting)
+            {
+                case 't':
+                {
+                    _filters[selected_bq].type = 
+                        (_filters[selected_bq].type - 1) % BQ_MAX;
+                    break;
+                }
+                case 'd':
+                {
+                    _filters[selected_bq].args[2] -= 0.1f;
+                    break;
+                }
+                case 'f':
+                {
+                    _filters[selected_bq].args[0] -= 10.0f;
+
+                    if (_filters[selected_bq].args[0] < 0.0f)
+                    {
+                        _filters[selected_bq].args[0] = 0.0f;
+                    }
+
+                    break;
+                }
+                case 'q':
+                {
+                    if (_filters[selected_bq].type == BQ_LOWPASS ||
+                        _filters[selected_bq].type == BQ_HIGHPASS)
+                    {
+                        break;
+                    }
+
+                    _filters[selected_bq].args[1] -= 0.1f;
+
+                    if (_filters[selected_bq].args[1] < 0.1f)
+                    {
+                        _filters[selected_bq].args[1] = 0.1f;
+                    }
+                    break;
+                }
+            }
+
+            bq_update(eq, _filters, selected_bq + 1, channels, fs);
+        }
+        else if (key == 'k') 
+        {
+            switch (selected_setting)
+            {
+                case 't':
+                {
+                    if (_filters[selected_bq].type == 0) {
+                        _filters[selected_bq].type = BQ_MAX + 1;
+                    }
+                    _filters[selected_bq].type = 
+                        _filters[selected_bq].type - 1;
+                    break;
+                }
+                case 'd':
+                {
+                    _filters[selected_bq].args[2] += 0.1f;
+                    break;
+                }
+                case 'f':
+                {
+                    _filters[selected_bq].args[0] += 10.0f;
+                    break;
+                }
+                case 'q':
+                {
+                    if (_filters[selected_bq].type == BQ_LOWPASS ||
+                        _filters[selected_bq].type == BQ_HIGHPASS ||
+                        _filters[selected_bq].args[1] == 0.0f)
+                    {
+                        break;
+                    }
+
+                    _filters[selected_bq].args[1] += 0.1f;
+
+                    break;
+                }
+            }
+
+            bq_update(eq, _filters, selected_bq + 1, channels, fs);
+        }
 
 		size_t frames_left = info->total_frames - info->frames_played;
 		size_t chunk = (frames_left > CHUNK_FRAMES) ? CHUNK_FRAMES : frames_left;
@@ -471,9 +583,9 @@ main(int argc, char *argv[])
 	char file_path[255];
 	(argc > 1) ? strncpy(file_path, argv[1], 255) : 0;
 
-	INIT_BQ(_filters[0], -5.0f, 1000.0f, 1.0f);
-	INIT_BQ(_filters[1], -5.0f, 1000.0f, 1.0f);
-	INIT_BQ(_filters[2], -5.0f, 1000.0f, 1.0f);
+	INIT_BQ(_filters[0], 1000.0f, 1.0f, -5.0f);
+	INIT_BQ(_filters[1], 1000.0f, 1.0f, -5.0f);
+	INIT_BQ(_filters[2], 1000.0f, 1.0f, -5.0f);
 
 	fprintf(stdout, "-- \x1b[34myacht\x1b[0m --\n");
 	enable_raw_mode();
@@ -878,6 +990,7 @@ main(int argc, char *argv[])
 	}
 
 	info.audio = &header;
+    info.loop = 0;
 	info.frame_size = header.bps / 8 * header.num_channels;
 	info.total_frames = pcm_size / info.frame_size;
 	info.frames_played = 0;

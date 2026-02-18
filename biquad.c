@@ -178,24 +178,24 @@ bq_update(
 			{
 			case BQ_PEAKING:
 				bq_peaking(&bqs[b][c],
+						bq_info[b].args[2],
 						bq_info[b].args[0],
-						bq_info[b].args[1],
 						(float) fs,
-						bq_info[b].args[2]);
+						bq_info[b].args[1]);
 				break;
 			case BQ_LOWSHELF:
 				bq_lowshelf(&bqs[b][c],
+						bq_info[b].args[2],
 						bq_info[b].args[0],
-						bq_info[b].args[1],
 						(float) fs,
-						bq_info[b].args[2]);
+						bq_info[b].args[1]);
 				break;
 			case BQ_HIGHSHELF:
 				bq_highshelf(&bqs[b][c],
+						bq_info[b].args[2],
 						bq_info[b].args[0],
-						bq_info[b].args[1],
 						(float) fs,
-						bq_info[b].args[2]);
+						bq_info[b].args[1]);
 				break;
 			case BQ_LOWPASS:
 				bq_lowpass(&bqs[b][c],

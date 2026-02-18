@@ -9,6 +9,7 @@ enum FilterType : int
 	BQ_HIGHSHELF,
 	BQ_LOWPASS,
 	BQ_HIGHPASS,
+    BQ_MAX
 };
 
 typedef struct
@@ -16,9 +17,9 @@ typedef struct
 	enum FilterType type;
 	float args[3];
 	// BQ_PEAKING, BQ_LOWSHELF, BQ_HIGHSHELF
-	// 0 - db_gain
-	// 1 - frequency
-	// 2 - quality
+	// 0 - frequency
+	// 1 - quality
+	// 2 - db_gain
 
 	// BQ_LOW_PASS, BQ_HIGHPASS
 	// 0 - frequency
