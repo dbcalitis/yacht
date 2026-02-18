@@ -73,6 +73,13 @@ typedef struct
 	uint8_t loop;
 } AudioInfo;
 
+typedef struct
+{
+    char audio_paths[20][MAX_STRING_LEN];
+    int count;
+    int current_audio;
+} Playlist;
+
 #define INIT_BQ(X, a, b, c) \
 	do { \
 		(X).type = BQ_NONE; \
@@ -230,6 +237,9 @@ display_screen(AudioInfo *info)
 void *
 audio_play(AudioInfo *info)
 {
+    int* exit_player = malloc(sizeof(int));
+    *exit_player = 0;
+
 	char key;
 	size_t frames_per_sec = info->audio->sample_rate ;//* info->audio->num_channels;
 	uint32_t five_sec = 5 * frames_per_sec;
@@ -237,7 +247,6 @@ audio_play(AudioInfo *info)
 	size_t fs = info->audio->sample_rate;
 	uint8_t channels = info->audio->num_channels;
 
-	// TODO(daria): modifiable eq while playing
 	Biquad eq[3][2];
 	int8_t selected_bq = 0;
     int8_t selected_setting = 0;
@@ -255,6 +264,7 @@ audio_play(AudioInfo *info)
 
 		if (key == 'Q')
         {
+            *exit_player = 1;
 			snd_pcm_drop(info->pcm_handle);
             goto END_AUDIO;
         }
@@ -272,7 +282,7 @@ audio_play(AudioInfo *info)
 				}
 			}
             
-            if (key == 'q') { goto END_AUDIO;}
+            if (key == 'Q') { goto END_AUDIO;}
 		}
 		else if (key == '<')
 		{
@@ -490,7 +500,7 @@ audio_play(AudioInfo *info)
 
 END_AUDIO:
 	info->state = PLAYER_STOPPED;
-	pthread_exit(NULL);
+	pthread_exit(exit_player);
 }
 
 int
@@ -576,11 +586,170 @@ print_files(
 }
 
 int
+read_file(
+        char *file_path,
+        WAVHeader *header,
+        AudioInfo *info,
+        char **file_buf,
+        int *offset)
+{
+    // Check if the file exists
+	{
+        int retval;
+		struct stat stat_buf;
+		if ((retval = stat(file_path, &stat_buf)) != 0) {
+			fprintf(stderr, "File not found, stat failed.\n\r");
+			exit(EXIT_FAILURE);
+		} 
+		info->audio_size = stat_buf.st_size;
+	}
+
+	int fd = open(file_path, O_RDONLY);
+*file_buf = (char *) mmap(NULL, info->audio_size, PROT_READ, MAP_SHARED, fd, 0);
+if (file_buf == MAP_FAILED) {
+		fprintf(stderr, "Failed to map %s file.\n", file_path);
+        return -2;
+	}
+	close(fd);
+
+    *offset = 0;
+
+    // RIFF Chunk
+    memcpy((uint8_t *) &(header->chunk_id), *file_buf + *offset, 4);
+    *offset += 4;
+
+    memcpy((uint8_t *) &(header->chunk_size), *file_buf + *offset, 4);
+    *offset += 4;
+
+    memcpy((uint8_t *) &(header->format), *file_buf + *offset, 4);
+    *offset += 4;
+
+    // RIFF/WAVE container
+    if (strncmp(header->chunk_id, "RIFF", 4) != 0)
+    {
+        fprintf(stderr, "Not a valid RIFF/WAVE file.\n\r");
+        return -1;
+    }
+    // Validate file size with WAV header
+    if (strncmp(header->format, "WAVE", 4) != 0)
+    {
+        fprintf(stderr, "WAVE chunk is not found.\n\r");
+        return -1;
+    }
+
+	// Check file size
+	// Exclude extra 8 bytes from header
+	{
+		int file_size_valid = info->audio_size - 8 - header->chunk_size;
+		if (file_size_valid != 0) {
+			fprintf(stderr, "%s file size does not match with chunk size.\n", file_path);
+            return -1;
+		}
+	}
+
+    {
+        struct {
+            char id[4];
+            uint32_t size;
+        } chunk;
+        uint8_t found_fmt = 0;
+
+        // Added a limit to the offset in case
+        // of an invalid WAV header
+        while (*offset < 100)
+        {
+            memcpy((uint8_t *) &chunk, *file_buf + *offset, 8);
+            *offset += 8;
+            printf("%.*s\n\r", 4, chunk.id);
+
+            if (strncmp(chunk.id, "fmt ", 4) == 0)
+            {
+                memcpy(&(header->subchunk1_id), (uint8_t *) &chunk, 8);
+                memcpy(&(header->audio_format), (uint8_t *) *file_buf + *offset, 16);
+                *offset += 16;
+                found_fmt = 1;
+            }
+            else if (strncmp(chunk.id, "data", 4) == 0)
+            {
+                memcpy(&(header->subchunk2_id), &chunk, 8);
+                // Reached the actual audio
+                break;
+            }
+            else
+            {
+                // Skip other subchunks, checks for padding
+                uint32_t bytes_to_skip = chunk.size;
+
+                if (bytes_to_skip % 2 != 0)
+                {
+                    bytes_to_skip += 1;
+                }
+
+                *offset += bytes_to_skip;
+            }
+
+            // TODO(daria): handle all types of chunks
+            // https://www.recordingblogs.com/wiki/wave-file-format
+        }
+
+        if (!found_fmt)
+        {
+            fprintf(stderr, "fmt subchunk is not found\n\r");
+            return -2;
+        }
+        
+        if (*offset > 100)
+        {
+            fprintf(stderr, "WAV Header is incomplete");
+            return -2;
+        }
+    }
+
+    return 0;
+}
+
+int
+validate_header(
+        char *file_path,
+        WAVHeader *header)
+{
+	// Sample Rate in Normal Range
+	if (header->sample_rate < 8000 && header->sample_rate > 192000)
+	{
+		fprintf(stderr, "%s file has sample rate outside the normal range\n", file_path);
+        return -1;
+	}
+
+	// Number of Channels
+	if (header->num_channels != 1 && header->num_channels != 2)
+	{
+		fprintf(stderr, "%s file is neither mono (1) or stereo (2)\n", file_path);
+        return -1;
+	}
+	
+	// BPS
+	if (!(header->bps == 8 || header->bps == 16 || header->bps == 24 || header->bps == 32))
+	{
+		fprintf(stderr, "%s file has invalid BPS\n", file_path);
+        return -1;
+	}
+
+	fprintf(stdout, "%s is a valid WAV file\n\r", file_path);
+    return 0;
+}
+
+int
 main(int argc, char *argv[])
 {
-	int err;
+    int retval;
 	WAVHeader header = { 0 };
+    Playlist playlist = { 0 };
 	AudioInfo info;
+    char *file_buf = NULL;
+    int offset = 0;
+    int is_playlist = 0;
+    int is_interactive = 0;
+    int filter_idx = -1;
 	
 	clear_screen();
 	fflush(stdout);
@@ -596,7 +765,31 @@ main(int argc, char *argv[])
 	fprintf(stdout, "-- \x1b[34myacht\x1b[0m --\n");
 	enable_raw_mode();
 
-	if (argc < 2) // Interactive Mode
+    if (argc == 1) { is_interactive = 1; } 
+    if (argc >= 2)
+    {
+        char *ext = strrchr(argv[1], '.');
+
+        if ((ext && strcmp(ext, ".wav") != 0) ||
+            (ext == NULL))
+        {
+            is_interactive = 1;
+        }
+
+		for (uint8_t i = 1; i < argc; i++)
+		{
+			if (strcmp(argv[i], "--playlist") == 0)
+			{
+                is_playlist = 1;
+			}
+			if (strcmp(argv[i], "--filter") == 0)
+			{
+                filter_idx = i;
+			}
+		}
+    }
+
+	if (is_interactive)
 	{
         // ------------------------------- //
         // ----- DIRECTORY TRAVERSAL ----- //
@@ -694,13 +887,36 @@ main(int argc, char *argv[])
                 {
                     fprintf(stdout, "\n\r");
                     struct stat stat_buf;
-                    if ((err = stat(input_line, &stat_buf)) != 0) {
+
+                    if (is_playlist &&
+                        strcmp(input_line, "finish playlist") == 0)
+                    {
+                        break;
+                    }
+
+                    if ((retval = stat(input_line, &stat_buf)) != 0) {
                         fprintf(stderr, "%s not found, stat failed.\n\r", input_line);
                     } 
                     else
                     {
-                        strncpy(file_path, input_line, sizeof(file_path));
-                        break;
+
+                        if (is_playlist && playlist.count == 20)
+                        {
+                            fprintf(stderr, "\n\rPlaylist capacity reached!\n\r");
+                        }
+                        else if (is_playlist)
+                        {
+                            strncpy(playlist.audio_paths[playlist.count],
+                                    input_line,
+                                    MAX_STRING_LEN);
+                            playlist.count++;
+                            memset(input_line, '\0', sizeof(input_line));
+                        }
+                        else
+                        {
+                            strncpy(file_path, input_line, sizeof(file_path));
+                            break;
+                        }
                     }
                 }
 			}
@@ -711,32 +927,8 @@ main(int argc, char *argv[])
 		}
 	}
 
-    if (argc >= 2)
-    {
-        char *ext = strrchr(argv[1], '.');
-
-        if ((ext && strcmp(ext, ".wav") != 0) ||
-            (ext == NULL))
-        {
-            fprintf(stdout, "Usage: %s <wav file> [--filter <txt file>]\n\r",
-                    argv[0]
-            );
-            exit(EXIT_FAILURE);
-        }
-    }
-
-	if (argc >= 3)
+	if (filter_idx > 0)
 	{
-        int filter_idx = -1;
-
-		for (uint8_t i = 1; i < argc; i++)
-		{
-			if (strcmp(argv[i], "--filter") == 0)
-			{
-                filter_idx = i;
-			}
-		}
-        
         if (filter_idx + 1 >= argc)
         {
             fprintf(stdout, "Usage: %s <wav file> [--filter <txt file>]\n\r",
@@ -822,217 +1014,117 @@ main(int argc, char *argv[])
         fclose(fp);
 	}
     
-    // ------------------------------- //
-    // ------- FILE READING ---------- //
-    // ------------------------------- //
-
-    // Check if the file exists
-	{
-		struct stat stat_buf;
-		if ((err = stat(file_path, &stat_buf)) != 0) {
-			fprintf(stderr, "File not found, stat failed.\n\r");
-			exit(EXIT_FAILURE);
-		} 
-		info.audio_size = stat_buf.st_size;
-	}
-
-	int fd = open(file_path, O_RDONLY);
-	char *file_buf = (char *) mmap(NULL, info.audio_size, PROT_READ, MAP_SHARED, fd, 0);
-	if (file_buf == MAP_FAILED) {
-		fprintf(stderr, "Failed to map %s file.\n", argv[1]);
-		goto EXIT;
-	}
-	close(fd);
-
-    uint8_t offset = 0;
-
-    // RIFF Chunk
-
-    memcpy((uint8_t *) &(header.chunk_id), file_buf + offset, 4);
-    offset += 4;
-
-    memcpy((uint8_t *) &(header.chunk_size), file_buf + offset, 4);
-    offset += 4;
-
-    memcpy((uint8_t *) &(header.format), file_buf + offset, 4);
-    offset += 4;
-
-    // RIFF/WAVE container
-    if (strncmp(header.chunk_id, "RIFF", 4) != 0)
+    if (is_playlist)
     {
-        fprintf(stderr, "Not a valid RIFF/WAVE file.\n\r");
-        goto CLEANUP;
-    }
-    // Validate file size with WAV header
-    if (strncmp(header.format, "WAVE", 4) != 0)
-    {
-        fprintf(stderr, "WAVE chunk is not found.\n\r");
-        goto CLEANUP;
+        strncpy(file_path, playlist.audio_paths[0], MAX_STRING_LEN); 
     }
 
-	// Check file size
-	// Exclude extra 8 bytes from header
-	{
-		int file_size_valid = info.audio_size - 8 - header.chunk_size;
-		if (file_size_valid != 0) {
-			fprintf(stderr, "%s file size does not match with chunk size.\n", file_path);
-			goto CLEANUP;
-		}
-	}
-
+    while (1)
     {
-        struct {
-            char id[4];
-            uint32_t size;
-        } chunk;
-        uint8_t found_fmt = 0;
+        // ------------------------------- //
+        // ------- FILE READING ---------- //
+        // ------------------------------- //
 
-        // Added a limit to the offset in case
-        // of an invalid WAV header
-        while (offset < 100)
+        retval = read_file(file_path, &header, &info, &file_buf, &offset);
+
+        if (retval == -1) { goto CLEANUP; }
+        if (retval == -2) { goto EXIT; }
+
+        // ------------------------------- //
+        // --- HEADER FIELD VALIDATION --- //
+        // ------------------------------- //
+
+        retval = validate_header(file_path, &header);
+        if (retval == -1) { goto CLEANUP; }
+
+        info.pcm_data = (uint8_t *) file_buf + offset;
+        size_t pcm_size = header.subchunk2_size;
+
+        // Opens default sound device
+        snd_pcm_open(&info.pcm_handle, "default", SND_PCM_STREAM_PLAYBACK, 0);
+
+        // Get the audio file's PCM format
+        snd_pcm_format_t pcm_format;
+
+        // PCM
+        switch (header.bps)
         {
-            memcpy((uint8_t *) &chunk, file_buf + offset, 8);
-            offset += 8;
-            printf("%.*s\n\r", 4, chunk.id);
-
-            if (strncmp(chunk.id, "fmt ", 4) == 0)
-            {
-                memcpy(&(header.subchunk1_id), (uint8_t *) &chunk, 8);
-                memcpy(&(header.audio_format), (uint8_t *) file_buf + offset, 16);
-                offset += 16;
-                found_fmt = 1;
-            }
-            else if (strncmp(chunk.id, "data", 4) == 0)
-            {
-                memcpy(&(header.subchunk2_id), &chunk, 8);
-                // Reached the actual audio
+            case 16:
+                pcm_format = SND_PCM_FORMAT_S16_LE;
                 break;
-            }
-            else
+            case 24:
+                pcm_format = SND_PCM_FORMAT_S24_3LE;
+                break;
+            case 32:
+                pcm_format = SND_PCM_FORMAT_S32_LE;
+                break;
+            default:
+                fprintf(stderr, "Unsupported bit depth: %d\n", header.bps);
+                goto CLEANUP;
+        }
+
+        info.audio = &header;
+        info.loop = 0;
+        info.frame_size = header.bps / 8 * header.num_channels;
+        info.total_frames = pcm_size / info.frame_size;
+        info.frames_played = 0;
+
+        // Sets the parameters
+        snd_pcm_set_params(info.pcm_handle,
+                pcm_format,
+                SND_PCM_ACCESS_RW_INTERLEAVED,
+                header.num_channels,
+                header.sample_rate,
+                1, 500000);
+
+        info.filename = strrchr(file_path, '/');
+        if (info.filename == NULL) { info.filename = file_path; }
+        else { info.filename += 1; }
+
+        pthread_t player_thread;
+        pthread_t screen_thread;
+        retval = pthread_create(&player_thread, NULL, (void *(*)(void *)) audio_play, &info);
+        if (retval != 0)
+        {
+            fprintf(stderr, "Failed to create a thread.\n");
+            goto CLEANUP;
+        }
+
+        retval = pthread_create(&screen_thread, NULL, (void *(*)(void *)) display_screen, &info);
+        if (retval != 0)
+        {
+            fprintf(stderr, "Failed to create a thread.\n");
+            goto CLEANUP;
+        }
+
+        void *exit_player = NULL;
+        pthread_join(player_thread, &exit_player);
+        pthread_join(screen_thread, NULL);
+
+        snd_pcm_drain(info.pcm_handle);
+        snd_pcm_close(info.pcm_handle);
+        snd_config_update_free_global();
+
+        if (*(int *)exit_player == 1)
+        {
+            free(exit_player);
+            break;
+        }
+
+        if (is_playlist)
+        {
+            playlist.current_audio++;
+
+            if (playlist.current_audio < playlist.count)
             {
-                // Skip other subchunks, checks for padding
-                uint32_t bytes_to_skip = chunk.size;
-
-                if (bytes_to_skip % 2 != 0)
-                {
-                    bytes_to_skip += 1;
-                }
-
-                offset += bytes_to_skip;
+                strncpy(file_path, playlist.audio_paths[playlist.current_audio], MAX_STRING_LEN);
+                continue;
             }
-
-            // TODO(daria): handle all types of chunks
-            // https://www.recordingblogs.com/wiki/wave-file-format
         }
 
-        if (!found_fmt)
-        {
-            fprintf(stderr, "fmt subchunk is not found\n\r");
-            goto EXIT;
-        }
-        
-        if (offset > 100)
-        {
-            fprintf(stderr, "WAV Header is incomplete");
-            goto EXIT;
-        }
+        break;
     }
 
-    // ------------------------------- //
-    // --- HEADER FIELD VALIDATION --- //
-    // ------------------------------- //
-
-	// Sample Rate in Normal Range
-	if (header.sample_rate < 8000 && header.sample_rate > 192000)
-	{
-		fprintf(stderr, "%s file has sample rate outside the normal range\n", file_path);
-		goto CLEANUP;
-	}
-
-	// Number of Channels
-	if (header.num_channels != 1 && header.num_channels != 2)
-	{
-		fprintf(stderr, "%s file is neither mono (1) or stereo (2)\n", file_path);
-		goto CLEANUP;
-	}
-	
-	// BPS
-	if (!(header.bps == 8 || header.bps == 16 || header.bps == 24 || header.bps == 32))
-	{
-		fprintf(stderr, "%s file has invalid BPS\n", file_path);
-		goto CLEANUP;
-	}
-
-	fprintf(stdout, "%s is a valid WAV file\n\r", file_path);
-
-	// Assumes header is ~44 bytes, ignores subchunk2_size
-	// to avoid wrong data.
-	info.pcm_data = (uint8_t *) file_buf + offset;
-	size_t pcm_size = header.subchunk2_size;//info.audio_size - 46; //header->subchunk2_size;
-
-	// Opens default sound device
-	snd_pcm_open(&info.pcm_handle, "default", SND_PCM_STREAM_PLAYBACK, 0);
-
-	// Get the audio file's PCM format
-	snd_pcm_format_t pcm_format;
-
-	// PCM
-	switch (header.bps)
-	{
-		case 16:
-			pcm_format = SND_PCM_FORMAT_S16_LE;
-			break;
-		case 24:
-			pcm_format = SND_PCM_FORMAT_S24_3LE;
-			break;
-		case 32:
-			pcm_format = SND_PCM_FORMAT_S32_LE;
-			break;
-		default:
-			fprintf(stderr, "Unsupported bit depth: %d\n", header.bps);
-			goto CLEANUP;
-	}
-
-	info.audio = &header;
-    info.loop = 0;
-	info.frame_size = header.bps / 8 * header.num_channels;
-	info.total_frames = pcm_size / info.frame_size;
-	info.frames_played = 0;
-
-	// Sets the parameters
-	snd_pcm_set_params(info.pcm_handle,
-			pcm_format,
-			SND_PCM_ACCESS_RW_INTERLEAVED,
-			header.num_channels,
-			header.sample_rate,
-			1, 500000);
-
-	info.filename = strrchr(file_path, '/');
-	if (info.filename == NULL) { info.filename = file_path; }
-	else { info.filename += 1; }
-
-	pthread_t player_thread;
-	pthread_t screen_thread;
-	err = pthread_create(&player_thread, NULL, (void *(*)(void *)) audio_play, &info);
-	if (err != 0)
-	{
-		fprintf(stderr, "Failed to create a thread.\n");
-		goto CLEANUP;
-	}
-
-	err = pthread_create(&screen_thread, NULL, (void *(*)(void *)) display_screen, &info);
-	if (err != 0)
-	{
-		fprintf(stderr, "Failed to create a thread.\n");
-		goto CLEANUP;
-	}
-
-	pthread_join(player_thread, NULL);
-	pthread_join(screen_thread, NULL);
-
-	snd_pcm_drain(info.pcm_handle);
-	snd_pcm_close(info.pcm_handle);
-    snd_config_update_free_global();
 
 CLEANUP:
 	munmap(file_buf, info.audio_size);
