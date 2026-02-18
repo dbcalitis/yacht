@@ -131,10 +131,10 @@ int
 keyboard_hit(void)
 {
 	struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
-	int ret_val;
+	int retval;
 
 	// TODO(daria): change ret value
-	if ((ret_val = poll(&pfd, 1, 0)) > 0 && (pfd.revents & POLLIN)) {
+	if ((retval = poll(&pfd, 1, 0)) > 0 && (pfd.revents & POLLIN)) {
 		char c;
 		read(STDIN_FILENO, &c, 1);
 
