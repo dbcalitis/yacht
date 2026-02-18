@@ -59,18 +59,20 @@ enum PlayerState {
 typedef struct
 {
 	WAVHeader *audio;
+	char *filename;
+
 	size_t frame_size;
 	size_t frames_played;
 	size_t total_frames;
+
 	size_t audio_size;
-	enum PlayerState state;
 	uint8_t *pcm_data;
-	uint8_t loop;
-	char *filename;
 	snd_pcm_t *pcm_handle;
+
+	enum PlayerState state;
+	uint8_t loop;
 } AudioInfo;
 
-// do i really need this? ;-;
 #define INIT_BQ(X, a, b, c) \
 	do { \
 		(X).type = BQ_NONE; \
@@ -251,7 +253,11 @@ audio_play(AudioInfo *info)
 	{
 		key = keyboard_hit();
 
-		if (key == 'Q') { goto END_AUDIO; }
+		if (key == 'Q')
+        {
+			snd_pcm_drop(info->pcm_handle);
+            goto END_AUDIO;
+        }
         else if (key == ' ')
 		{
 			snd_pcm_drop(info->pcm_handle);
@@ -528,7 +534,7 @@ print_files(
         {
             if (dir_entry->d_name[0] == '.') continue;
 
-            char full_path[1024];
+            char full_path[1300];
             snprintf(full_path, sizeof(full_path), "%s/%s", current_path, dir_entry->d_name);
 
             struct stat st;
@@ -580,7 +586,7 @@ main(int argc, char *argv[])
 	fflush(stdout);
 	fflush(stderr);
 
-	char file_path[255];
+	char file_path[1300];
 	(argc > 1) ? strncpy(file_path, argv[1], 255) : 0;
 
 	INIT_BQ(_filters[0], 1000.0f, 1.0f, -5.0f);
@@ -687,17 +693,15 @@ main(int argc, char *argv[])
                 else
                 {
                     fprintf(stdout, "\n\r");
-
-                    char *pt;
-                    uint8_t j = 0;
-                    for (; j < file_idx; j++)
+                    struct stat stat_buf;
+                    if ((err = stat(input_line, &stat_buf)) != 0) {
+                        fprintf(stderr, "%s not found, stat failed.\n\r", input_line);
+                    } 
+                    else
                     {
-                        pt = strstr(files[j], input_line);
-                        if (pt) { break; }
+                        strncpy(file_path, input_line, sizeof(file_path));
+                        break;
                     }
-                    // this is horrible
-                    if (pt) { strncpy(file_path, files[j], 255); break; }
-                    fprintf(stdout, "%s not found\n\r", input_line);
                 }
 			}
 			else if (line_length + 1 < 255) { strcat(input_line, c); }
