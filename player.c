@@ -86,8 +86,8 @@ typedef struct
 		memcpy((X).args, (float[]) {a, b, c}, sizeof((X).args)); \
 	} while (0)
 
-BiquadInfo _filters[3];
-uint8_t _num_filters = 0;
+BiquadInfo filters[3];
+uint8_t num_filters = 0;
 
 // masking -
 // char *buf = mmap;
@@ -196,10 +196,10 @@ display_screen(AudioInfo *info)
 		{
 			fprintf(stdout, "  %d - %-10d %-10.1f %-10.0f %-5.1f\n\r",
 					i,
-					_filters[i].type,
-					_filters[i].args[2],
-					_filters[i].args[0],
-					_filters[i].args[1]);
+					filters[i].type,
+					filters[i].args[2],
+					filters[i].args[0],
+					filters[i].args[1]);
 		}
 
 		fprintf(stdout, "\n\r");
@@ -250,7 +250,7 @@ audio_play(AudioInfo *info)
 	int8_t selected_bq = 0;
     int8_t selected_setting = 0;
 
-    bq_update(eq, _filters, 3, channels, fs);
+    bq_update(eq, filters, 3, channels, fs);
 
 	static uint8_t buffer[CHUNK_FRAMES * 8];
 	static float fbuf[CHUNK_FRAMES * 8];
@@ -331,45 +331,45 @@ audio_play(AudioInfo *info)
             {
                 case 't':
                 {
-                    _filters[selected_bq].type = 
-                        (_filters[selected_bq].type - 1) % BQ_MAX;
+                    filters[selected_bq].type = 
+                        (filters[selected_bq].type - 1) % BQ_MAX;
                     break;
                 }
                 case 'd':
                 {
-                    _filters[selected_bq].args[2] -= 0.1f;
+                    filters[selected_bq].args[2] -= 0.1f;
                     break;
                 }
                 case 'f':
                 {
-                    _filters[selected_bq].args[0] -= 10.0f;
+                    filters[selected_bq].args[0] -= 10.0f;
 
-                    if (_filters[selected_bq].args[0] < 0.0f)
+                    if (filters[selected_bq].args[0] < 0.0f)
                     {
-                        _filters[selected_bq].args[0] = 0.0f;
+                        filters[selected_bq].args[0] = 0.0f;
                     }
 
                     break;
                 }
                 case 'q':
                 {
-                    if (_filters[selected_bq].type == BQ_LOWPASS ||
-                        _filters[selected_bq].type == BQ_HIGHPASS)
+                    if (filters[selected_bq].type == BQ_LOWPASS ||
+                        filters[selected_bq].type == BQ_HIGHPASS)
                     {
                         break;
                     }
 
-                    _filters[selected_bq].args[1] -= 0.1f;
+                    filters[selected_bq].args[1] -= 0.1f;
 
-                    if (_filters[selected_bq].args[1] < 0.1f)
+                    if (filters[selected_bq].args[1] < 0.1f)
                     {
-                        _filters[selected_bq].args[1] = 0.1f;
+                        filters[selected_bq].args[1] = 0.1f;
                     }
                     break;
                 }
             }
 
-            bq_update(eq, _filters, selected_bq + 1, channels, fs);
+            bq_update(eq, filters, selected_bq + 1, channels, fs);
         }
         else if (key == 'k') 
         {
@@ -377,39 +377,39 @@ audio_play(AudioInfo *info)
             {
                 case 't':
                 {
-                    if (_filters[selected_bq].type == 0) {
-                        _filters[selected_bq].type = BQ_MAX + 1;
+                    if (filters[selected_bq].type == 0) {
+                        filters[selected_bq].type = BQ_MAX + 1;
                     }
-                    _filters[selected_bq].type = 
-                        _filters[selected_bq].type - 1;
+                    filters[selected_bq].type = 
+                        filters[selected_bq].type - 1;
                     break;
                 }
                 case 'd':
                 {
-                    _filters[selected_bq].args[2] += 0.1f;
+                    filters[selected_bq].args[2] += 0.1f;
                     break;
                 }
                 case 'f':
                 {
-                    _filters[selected_bq].args[0] += 10.0f;
+                    filters[selected_bq].args[0] += 10.0f;
                     break;
                 }
                 case 'q':
                 {
-                    if (_filters[selected_bq].type == BQ_LOWPASS ||
-                        _filters[selected_bq].type == BQ_HIGHPASS ||
-                        _filters[selected_bq].args[1] == 0.0f)
+                    if (filters[selected_bq].type == BQ_LOWPASS ||
+                        filters[selected_bq].type == BQ_HIGHPASS ||
+                        filters[selected_bq].args[1] == 0.0f)
                     {
                         break;
                     }
 
-                    _filters[selected_bq].args[1] += 0.1f;
+                    filters[selected_bq].args[1] += 0.1f;
 
                     break;
                 }
             }
 
-            bq_update(eq, _filters, selected_bq + 1, channels, fs);
+            bq_update(eq, filters, selected_bq + 1, channels, fs);
         }
 
 		size_t frames_left = info->total_frames - info->frames_played;
@@ -450,9 +450,9 @@ audio_play(AudioInfo *info)
 				float x = fbuf[idx];
 
 				// TEMP change
-				for (uint8_t n = 0; n < 3 /*_num_filters*/; n++)
+				for (uint8_t n = 0; n < 3 /*num_filters*/; n++)
 				{
-					if (_filters[n].type != BQ_NONE)
+					if (filters[n].type != BQ_NONE)
 						x = bq_process(&eq[n][ch], x);
 				}
 				fbuf[idx] = x;
@@ -757,9 +757,9 @@ main(int argc, char *argv[])
 	char file_path[1300];
 	(argc > 1) ? strncpy(file_path, argv[1], 255) : 0;
 
-	INIT_BQ(_filters[0], 1000.0f, 1.0f, -5.0f);
-	INIT_BQ(_filters[1], 1000.0f, 1.0f, -5.0f);
-	INIT_BQ(_filters[2], 1000.0f, 1.0f, -5.0f);
+	INIT_BQ(filters[0], 1000.0f, 1.0f, -5.0f);
+	INIT_BQ(filters[1], 1000.0f, 1.0f, -5.0f);
+	INIT_BQ(filters[2], 1000.0f, 1.0f, -5.0f);
 
 	fprintf(stdout, "-- \x1b[34myacht\x1b[0m --\n");
 	enable_raw_mode();
@@ -957,27 +957,27 @@ main(int argc, char *argv[])
 
             if (strcmp(line_buf, "BQ_PEAKING") == 0)
             {
-                _filters[_num_filters].type = BQ_PEAKING;
+                filters[num_filters].type = BQ_PEAKING;
                 filter_nargs = 3;
             }
             else if (strcmp(line_buf, "BQ_LOWSHELF") == 0)
             {
-                _filters[_num_filters].type = BQ_LOWSHELF;
+                filters[num_filters].type = BQ_LOWSHELF;
                 filter_nargs = 3;
             }
             else if (strcmp(line_buf, "BQ_HIGHSHELF") == 0)
             {
-                _filters[_num_filters].type = BQ_HIGHSHELF;
+                filters[num_filters].type = BQ_HIGHSHELF;
                 filter_nargs = 3;
             }
             else if (strcmp(line_buf, "BQ_LOWPASS") == 0)
             {
-                _filters[_num_filters].type = BQ_LOWPASS;
+                filters[num_filters].type = BQ_LOWPASS;
                 filter_nargs = 2;
             }
             else if (strcmp(line_buf, "BQ_HIGHPASS") == 0)
             {
-                _filters[_num_filters].type = BQ_HIGHPASS;
+                filters[num_filters].type = BQ_HIGHPASS;
                 filter_nargs = 2;
             }
             else
@@ -991,19 +991,19 @@ main(int argc, char *argv[])
                 {
                     fprintf(stderr,
                     "Not enough args for filter #%d\n\r",
-                    _num_filters + 1);
+                    num_filters + 1);
                     exit(EXIT_FAILURE);
                 }
 
                 errno = 0;
                 char *end;
-                _filters[_num_filters].args[i] = strtof(line_buf, &end);
+                filters[num_filters].args[i] = strtof(line_buf, &end);
             }
 
-            _num_filters++;
+            num_filters++;
         }
         
-        if (_num_filters == 0)
+        if (num_filters == 0)
         {
             fprintf(stdout,
             "No filters are applied; none were valid.\n\r");
